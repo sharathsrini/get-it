@@ -18,22 +18,28 @@ import {
   type CodexAccountInfo,
   type CodexRateLimits,
 } from "@/lib/codex-account";
+import {
+  readClaudeAccountInfo,
+  readClaudeRateLimits,
+} from "@/lib/claude-account";
+import { getActiveProviderId } from "@/lib/ai";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const provider = getActiveProviderId();
   const account: CodexAccountInfo | null = (() => {
     try {
-      return readAccountInfo();
+      return provider === "claude" ? readClaudeAccountInfo() : readAccountInfo();
     } catch {
       return null;
     }
   })();
   let limits: CodexRateLimits | null = null;
   try {
-    limits = await readRateLimits();
+    limits = provider === "claude" ? await readClaudeRateLimits() : await readRateLimits();
   } catch {
     limits = null;
   }
-  return NextResponse.json({ account, rateLimits: limits });
+  return NextResponse.json({ account, rateLimits: limits, provider });
 }

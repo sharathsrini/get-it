@@ -41,6 +41,12 @@ const target = args.find((a) => a.startsWith("--target="))?.split("=")[1] ?? nul
 
 const REQUIRED_CODEX_VERSION = process.env.CODEX_VERSION || "0.130.0";
 
+// Claude Code ships a single platform-independent Node CLI (cli.js) rather than
+// a per-triple native binary, so one staged copy works on every target. We pin
+// a version but allow override; staging is best-effort (Claude is opt-in, so a
+// fetch failure must not break a Codex-only build).
+const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION || "latest";
+
 const PLATFORM_PKG_BY_TARGET = {
   "darwin-arm64": "@openai/codex-darwin-arm64",
   "darwin-x64": "@openai/codex-darwin-x64",
@@ -239,6 +245,49 @@ async function fetchPlatformPackage(targetTriple) {
   console.log(`[electron-prepare] staged codex binary at electron/codex-bin/${triple}/codex/${exeName}`);
 }
 
+/**
+ * Stage the Claude Code CLI into electron/claude-bin so the packaged app can
+ * spawn it via Electron's Node. Unlike Codex there's no per-triple binary —
+ * cli.js is platform-independent — so a single staged copy covers all targets.
+ * Best-effort: prefers a node_modules copy, otherwise fetches the npm tarball;
+ * any failure is logged and skipped so Codex-only builds still succeed.
+ */
+async function stageClaudeCli() {
+  const claudeBinRoot = path.join(REPO_ROOT, "electron", "claude-bin");
+  const pkgDir = path.join(REPO_ROOT, "node_modules", "@anthropic-ai", "claude-code");
+  try {
+    if (fssync.existsSync(path.join(pkgDir, "cli.js"))) {
+      await fs.rm(claudeBinRoot, { recursive: true, force: true });
+      await fs.mkdir(claudeBinRoot, { recursive: true });
+      await copyDir(pkgDir, claudeBinRoot);
+      console.log("[electron-prepare] staged Claude CLI from node_modules into electron/claude-bin.");
+      return;
+    }
+    const url = `https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${CLAUDE_CLI_VERSION}.tgz`;
+    // "latest" isn't a real tarball filename — resolve via the registry doc.
+    let tgzUrl = url;
+    if (CLAUDE_CLI_VERSION === "latest") {
+      const meta = JSON.parse(
+        (await downloadBuffer("https://registry.npmjs.org/@anthropic-ai/claude-code")).toString("utf8"),
+      );
+      const latest = meta["dist-tags"]?.latest;
+      tgzUrl = meta.versions?.[latest]?.dist?.tarball;
+      if (!tgzUrl) throw new Error("could not resolve Claude CLI latest tarball");
+    }
+    console.log(`[electron-prepare] fetching Claude CLI ${tgzUrl}…`);
+    const gz = await downloadBuffer(tgzUrl);
+    const tar = zlib.gunzipSync(gz);
+    await fs.rm(claudeBinRoot, { recursive: true, force: true });
+    await fs.mkdir(claudeBinRoot, { recursive: true });
+    extractTar(tar, claudeBinRoot, true);
+    console.log("[electron-prepare] staged Claude CLI into electron/claude-bin.");
+  } catch (err) {
+    console.warn(
+      `[electron-prepare] skipped Claude CLI staging (Codex-only build still OK): ${err && err.message ? err.message : err}`,
+    );
+  }
+}
+
 function hostTarget() {
   const { platform, arch } = process;
   if (platform === "darwin") return arch === "arm64" ? "darwin-arm64" : "darwin-x64";
@@ -256,6 +305,8 @@ async function main() {
   if (effective) {
     await fetchPlatformPackage(effective);
   }
+  // Claude is platform-independent and opt-in; stage it on every build.
+  await stageClaudeCli();
 }
 
 main().catch((err) => {

@@ -61,6 +61,7 @@ const {
   ensureCodexReady,
   showSetupWindow,
   resolveCodexBinary,
+  resolveClaudeBinary,
   refreshCodexStatus,
   onCodexStatusChange,
 } = require("./setup");
@@ -202,6 +203,15 @@ async function startEmbeddedServer() {
   // skip module resolution entirely.
   const codexInfo = resolveCodexBinary();
   if (codexInfo) env.CODEX_BINARY_PATH = codexInfo.path;
+  // Likewise tell lib/claude.ts where the Claude CLI lives so it resolves the
+  // bundled copy deterministically instead of scanning node_modules. We point
+  // at the cli.js when it must run under Electron's Node, else the launcher.
+  const claudeInfo = resolveClaudeBinary();
+  if (claudeInfo) {
+    env.CLAUDE_BINARY_PATH = claudeInfo.runAsNode
+      ? claudeInfo.args[0]
+      : claudeInfo.command;
+  }
 
   const nodeBin = process.execPath; // Electron's own node — works for ES modules
   // Spawn the watchdog wrapper if it was copied next to server.js by

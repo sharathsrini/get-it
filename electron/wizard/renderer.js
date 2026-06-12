@@ -6,9 +6,11 @@ const els = {
   stepLogin: document.getElementById("step-login"),
   stepLoginMarker: document.getElementById("step-login-marker"),
   headerBlurb: document.getElementById("header-blurb"),
+  installTitle: document.getElementById("install-title"),
   installDesc: document.getElementById("install-desc"),
   installStatus: document.getElementById("install-status"),
   btnInstall: document.getElementById("btn-install"),
+  loginTitle: document.getElementById("login-title"),
   loginDesc: document.getElementById("login-desc"),
   loginStatus: document.getElementById("login-status"),
   btnLogin: document.getElementById("btn-login"),
@@ -18,40 +20,74 @@ const els = {
   authUrlBox: document.getElementById("auth-url-box"),
   authUrl: document.getElementById("auth-url"),
   btnOpenUrl: document.getElementById("btn-open-url"),
+  providerChoices: Array.from(document.querySelectorAll(".provider-choice")),
 };
 
-const BLURB_SIGNIN_ONLY =
-  "Sign in with the ChatGPT account you already use — that's the one Get It.'s agents run against. Your study data never leaves this Mac/PC.";
-const BLURB_INSTALL_AND_SIGNIN =
-  "We couldn't find Get It.'s bundled Codex CLI. Install a backup copy and sign in — your study data never leaves this Mac/PC.";
+// Per-provider copy. Codex ships a per-triple binary that can be missing
+// (install step); Claude is a bundled Node CLI that's always present, so its
+// "install" step never surfaces and it has no minimum-version gate.
+const PROVIDERS = {
+  codex: {
+    label: "OpenAI Codex",
+    cliName: "Codex CLI",
+    signInTitle: "Sign in with ChatGPT or OpenAI",
+    signInButton: "Sign in with ChatGPT",
+    signedIn: "You're signed in to Codex.",
+    blurbSignin:
+      "Sign in with the ChatGPT account you already use — that's the one Get It.'s agents run against. Your study data never leaves this Mac/PC.",
+    blurbInstall:
+      "We couldn't find Get It.'s bundled Codex CLI. Install a backup copy and sign in — your study data never leaves this Mac/PC.",
+  },
+  claude: {
+    label: "Anthropic Claude",
+    cliName: "Claude CLI",
+    signInTitle: "Sign in with Claude",
+    signInButton: "Sign in with Claude",
+    signedIn: "You're signed in to Claude.",
+    blurbSignin:
+      "Sign in with the Claude (Pro or Max) account you already use — that's the one Get It.'s agents run against. Your study data never leaves this Mac/PC.",
+    blurbInstall:
+      "We couldn't find Get It.'s bundled Claude CLI. Reinstall the app — your study data never leaves this Mac/PC.",
+  },
+};
 
 let lastAuthUrl = null;
 let lastPhase = "idle";
+let activeProvider = "codex";
 
 function render(s) {
   if (!s) return;
-  els.platformInfo.textContent = s.targetTriple
-    ? `Platform: ${s.targetTriple}  ·  Required: ≥ ${s.requiredVersion}`
-    : "";
+  activeProvider = s.provider === "claude" ? "claude" : "codex";
+  const copy = PROVIDERS[activeProvider];
 
-  // The bundled Codex binary ships inside the .app / installer for every
-  // user. The install step only surfaces on the rare path where the
-  // bundled copy is genuinely missing — antivirus quarantine, a partial
-  // install, or someone running `electron .` from source without first
-  // running `npm run electron:prepare`. The common path is one step:
-  // sign in.
-  const codexReady = s.binaryFound && s.versionOk;
-  const showInstallStep = !codexReady;
+  for (const btn of els.providerChoices) {
+    const on = btn.dataset.provider === activeProvider;
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+    // Don't let the user switch providers mid-login.
+    btn.disabled = s.phase === "logging-in" || s.phase === "installing";
+  }
+
+  els.platformInfo.textContent =
+    activeProvider === "codex" && s.targetTriple
+      ? `Platform: ${s.targetTriple}  ·  Required: ≥ ${s.requiredVersion}`
+      : "";
+
+  // The bundled binary ships inside the .app / installer for every user. The
+  // install step only surfaces on the rare path where the bundled copy is
+  // genuinely missing. The common path is one step: sign in.
+  const cliReady = s.binaryFound && s.versionOk;
+  const showInstallStep = !cliReady;
 
   els.stepInstall.hidden = !showInstallStep;
   els.stepInstallMarker.textContent = "1";
   els.stepLoginMarker.textContent = showInstallStep ? "2" : "1";
   els.headerBlurb.textContent = showInstallStep
-    ? BLURB_INSTALL_AND_SIGNIN
-    : BLURB_SIGNIN_ONLY;
+    ? copy.blurbInstall
+    : copy.blurbSignin;
 
   // ── Step 1: install / version (only visible when bundled copy missing)
   if (showInstallStep) {
+    els.installTitle.textContent = copy.cliName;
     els.stepInstall.classList.toggle("done", false);
     els.stepInstall.classList.toggle(
       "active",
@@ -59,16 +95,16 @@ function render(s) {
     );
     els.stepInstall.classList.toggle("error", s.phase === "error");
     if (!s.binaryFound) {
-      els.installDesc.textContent = `Get It.'s bundled Codex CLI ${s.requiredVersion} is missing on this machine. Install a fresh copy now — one-time download, ~30 MB.`;
-      els.btnInstall.disabled = false;
-      els.btnInstall.textContent = "Install Codex CLI";
+      els.installDesc.textContent = `Get It.'s bundled ${copy.cliName} is missing on this machine.`;
+      els.btnInstall.disabled = activeProvider === "claude";
+      els.btnInstall.textContent = `Install ${copy.cliName}`;
     } else {
       // binary present but version too old — only reachable for the
       // node_modules / userdata sources, since the bundled copy's
       // version is pinned at build time.
-      els.installDesc.textContent = `The Codex CLI on this machine is ${s.version ?? "an unknown version"}; Get It. needs ≥ ${s.requiredVersion}. Update?`;
-      els.btnInstall.disabled = false;
-      els.btnInstall.textContent = "Update Codex CLI";
+      els.installDesc.textContent = `The ${copy.cliName} on this machine is ${s.version ?? "an unknown version"}; Get It. needs ≥ ${s.requiredVersion}. Update?`;
+      els.btnInstall.disabled = activeProvider === "claude";
+      els.btnInstall.textContent = `Update ${copy.cliName}`;
     }
     if (s.phase === "installing") {
       els.installStatus.innerHTML = `<span class="spinner"></span>${escapeHtml(s.message || "Installing…")}`;
@@ -81,18 +117,19 @@ function render(s) {
   }
 
   // ── Sign-in step (always visible)
+  els.loginTitle.textContent = copy.signInTitle;
   els.stepLogin.classList.toggle("done", s.loggedIn);
-  els.stepLogin.classList.toggle("active", codexReady && !s.loggedIn);
+  els.stepLogin.classList.toggle("active", cliReady && !s.loggedIn);
   els.stepLogin.classList.toggle(
     "error",
-    s.phase === "error" && codexReady && !s.loggedIn,
+    s.phase === "error" && cliReady && !s.loggedIn,
   );
-  if (!codexReady) {
-    els.loginDesc.textContent = "Install Codex CLI first.";
+  if (!cliReady) {
+    els.loginDesc.textContent = `Install ${copy.cliName} first.`;
     els.btnLogin.disabled = true;
     els.loginStatus.innerHTML = "";
   } else if (s.loggedIn) {
-    els.loginDesc.textContent = "You're signed in to Codex.";
+    els.loginDesc.textContent = copy.signedIn;
     els.btnLogin.disabled = true;
     els.btnLogin.textContent = "Signed in";
     els.loginStatus.innerHTML = `<span class="ok">✓ Connected</span>`;
@@ -100,7 +137,7 @@ function render(s) {
     els.loginDesc.textContent =
       "A browser window will open. After you finish signing in there, this dialog continues automatically.";
     els.btnLogin.disabled = s.phase === "logging-in";
-    els.btnLogin.textContent = "Sign in with ChatGPT";
+    els.btnLogin.textContent = copy.signInButton;
     if (s.phase === "logging-in") {
       els.loginStatus.innerHTML = `<span class="spinner"></span>${escapeHtml(s.message || "Waiting for browser…")}`;
     } else if (s.phase === "error") {
@@ -121,7 +158,7 @@ function render(s) {
   }
 
   // ── Finish button — only enabled when everything green
-  els.btnFinish.disabled = !(codexReady && s.loggedIn);
+  els.btnFinish.disabled = !(cliReady && s.loggedIn);
 
   lastPhase = s.phase ?? "idle";
 }
@@ -133,6 +170,13 @@ function escapeHtml(s) {
 }
 
 // ── Wire buttons ────────────────────────────────────────────────────────
+for (const btn of els.providerChoices) {
+  btn.addEventListener("click", async () => {
+    const next = btn.dataset.provider;
+    if (next === activeProvider) return;
+    await window.wizard.setProvider(next);
+  });
+}
 els.btnInstall.addEventListener("click", async () => {
   els.btnInstall.disabled = true;
   await window.wizard.install();

@@ -183,6 +183,11 @@
         margin-right: 6px;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
+      .provider-choice[aria-checked="true"] {
+        background: var(--accent-600);
+        color: white;
+        border-color: var(--accent-600);
+      }
       .url-fallback {
         word-break: break-all;
         background: var(--surface-canvas);
@@ -210,10 +215,22 @@
     </header>
 
     <main>
+      <div class="step active" id="step-provider">
+        <div class="step-marker">A</div>
+        <div style="min-width: 0; flex: 1;">
+          <h2>Choose your AI engine</h2>
+          <p>Get It. runs against a subscription you already pay for — nothing leaves this machine and there's no shared key pool.</p>
+          <div class="controls" id="provider-choices" role="radiogroup" aria-label="AI engine">
+            <button class="btn secondary provider-choice" id="choice-codex" data-provider="codex" role="radio" aria-checked="true">OpenAI Codex</button>
+            <button class="btn secondary provider-choice" id="choice-claude" data-provider="claude" role="radio" aria-checked="false">Anthropic Claude</button>
+          </div>
+        </div>
+      </div>
+
       <div class="step" id="step-install" hidden>
         <div class="step-marker" id="step-install-marker">1</div>
         <div style="min-width: 0; flex: 1;">
-          <h2>Codex CLI</h2>
+          <h2 id="install-title">Codex CLI</h2>
           <p id="install-desc">Checking…</p>
           <div class="controls">
             <button class="btn" id="btn-install" disabled>Install</button>
@@ -225,7 +242,7 @@
       <div class="step" id="step-login">
         <div class="step-marker" id="step-login-marker">1</div>
         <div style="min-width: 0; flex: 1;">
-          <h2>Sign in with ChatGPT or OpenAI</h2>
+          <h2 id="login-title">Sign in with ChatGPT or OpenAI</h2>
           <p id="login-desc">A browser window will open to authenticate. The same login is used by Codex itself.</p>
           <div class="controls">
             <button class="btn" id="btn-login" disabled>Sign in</button>

@@ -7,10 +7,12 @@
 
 import { NextResponse } from "next/server";
 import { runLogout } from "@/lib/codex-account";
+import { runClaudeLogout } from "@/lib/claude-account";
+import { getActiveProviderId } from "@/lib/ai";
 
 export const runtime = "nodejs";
 
 export async function POST() {
-  const ok = runLogout();
+  const ok = getActiveProviderId() === "claude" ? runClaudeLogout() : runLogout();
   return NextResponse.json({ ok });
 }

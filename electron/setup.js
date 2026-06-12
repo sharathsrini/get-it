@@ -205,6 +205,194 @@ function isCodexAuthenticated(binPath) {
   }
 }
 
+// ── Anthropic Claude Code support ───────────────────────────────────────
+// The second selectable provider. Unlike Codex's per-triple Rust binary, the
+// Claude CLI is a Node program shipped by the `@anthropic-ai/claude-code` npm
+// package — the SAME cli.js on every platform — so we run it with Electron's
+// own Node (ELECTRON_RUN_AS_NODE=1) rather than depending on a system `node`.
+// We drive its browser-based OAuth login so subscription users (Pro / Max)
+// authenticate against the plan they already pay for, mirroring the Codex
+// "bring your own subscription" model.
+
+// Persisted provider choice lives in the same settings.json the Next runtime
+// reads (lib/settings-store.ts). We only touch the `aiProvider` field.
+function settingsPath() {
+  try {
+    return path.join(app.getPath("userData"), "settings.json");
+  } catch {
+    return null;
+  }
+}
+
+function getActiveProvider() {
+  const p = settingsPath();
+  if (!p) return "codex";
+  try {
+    const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
+    return parsed && parsed.aiProvider === "claude" ? "claude" : "codex";
+  } catch {
+    return "codex";
+  }
+}
+
+function setActiveProvider(provider) {
+  const next = provider === "claude" ? "claude" : "codex";
+  const p = settingsPath();
+  if (!p) return next;
+  let existing = {};
+  try {
+    existing = JSON.parse(fs.readFileSync(p, "utf8")) || {};
+  } catch {
+    /* fresh file */
+  }
+  const merged = { ...existing, v: 1, savedAt: Date.now(), aiProvider: next };
+  try {
+    const tmp = `${p}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
+    fs.renameSync(tmp, p);
+  } catch {
+    /* best-effort */
+  }
+  return next;
+}
+
+// Where Claude Code persists its OAuth credentials + config.
+function claudeHomeDir() {
+  if (process.env.CLAUDE_CONFIG_DIR) return path.resolve(process.env.CLAUDE_CONFIG_DIR);
+  return path.join(os.homedir(), ".claude");
+}
+
+/**
+ * Locate the Claude CLI. Returns `{ command, args, source }` describing how to
+ * spawn it, or null. The `command`/`args` split lets us run a Node cli.js via
+ * Electron's Node when there's no native launcher.
+ */
+function resolveClaudeBinary() {
+  const cmdExe = process.platform === "win32" ? "claude.cmd" : "claude";
+
+  // 1) Bundled cli.js staged by electron-prepare at electron/claude-bin/cli.js.
+  const bundledCandidates = [];
+  if (process.resourcesPath) {
+    bundledCandidates.push(
+      path.join(process.resourcesPath, "app.asar.unpacked", "electron", "claude-bin", "cli.js"),
+      path.join(process.resourcesPath, "electron", "claude-bin", "cli.js"),
+    );
+  }
+  bundledCandidates.push(path.join(app.getAppPath(), "electron", "claude-bin", "cli.js"));
+  for (const cliJs of bundledCandidates) {
+    if (fs.existsSync(cliJs)) {
+      return { command: process.execPath, args: [cliJs], source: "bundled", runAsNode: true };
+    }
+  }
+
+  // 2) The package's cli.js inside node_modules (dev / transitive dep).
+  for (const root of candidateNodeModulesRoots()) {
+    const cliJs = path.join(root, "@anthropic-ai", "claude-code", "cli.js");
+    if (fs.existsSync(cliJs)) {
+      return { command: process.execPath, args: [cliJs], source: "node_modules", runAsNode: true };
+    }
+    const launcher = path.join(root, ".bin", cmdExe);
+    if (fs.existsSync(launcher)) {
+      return { command: launcher, args: [], source: "node_modules", runAsNode: false };
+    }
+  }
+
+  return null;
+}
+
+function claudeSpawnEnv(resolved) {
+  const env = { ...process.env };
+  if (resolved && resolved.runAsNode) env.ELECTRON_RUN_AS_NODE = "1";
+  else delete env.ELECTRON_RUN_AS_NODE;
+  return env;
+}
+
+function isClaudeAuthenticated() {
+  // No network: the presence of a credentials file (or the oauthAccount block
+  // in the config) is sufficient to know a browser login completed.
+  const home = claudeHomeDir();
+  for (const f of [
+    path.join(home, ".credentials.json"),
+    path.join(home, "credentials.json"),
+  ]) {
+    try {
+      if (fs.existsSync(f)) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const f of [path.join(home, ".claude.json"), path.join(home, "config.json")]) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(f, "utf8"));
+      if (parsed && parsed.oauthAccount) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
+}
+
+// ── claude login subprocess driver ───────────────────────────────────────
+// Drives Claude Code's browser OAuth. `setup-token` initiates the OAuth flow
+// and prints an authentication URL; the binary opens the browser itself, and
+// we also surface the URL in the wizard as a fallback (same pattern as Codex).
+function runClaudeLogin(onLine) {
+  return new Promise((resolve, reject) => {
+    const resolved = resolveClaudeBinary();
+    if (!resolved) {
+      reject(new Error("Claude CLI is not installed"));
+      return;
+    }
+    const child = spawn(resolved.command, [...resolved.args, "setup-token"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: claudeSpawnEnv(resolved),
+      windowsHide: true,
+    });
+    let buf = "";
+    let succeeded = false;
+    const onChunk = (data) => {
+      const text = data.toString("utf8");
+      buf += text;
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        onLine?.(line);
+        if (/(logged in|login success|authenticated|setup complete|token saved)/i.test(line)) {
+          succeeded = true;
+        }
+      }
+    };
+    child.stdout?.on("data", onChunk);
+    child.stderr?.on("data", onChunk);
+    child.once("exit", (code) => {
+      if (succeeded || code === 0 || isClaudeAuthenticated()) {
+        resolve(true);
+      } else {
+        const tail = buf.split(/\r?\n/).slice(-3).join("\n").trim();
+        reject(new Error(tail || `claude login exited with code ${code}`));
+      }
+    });
+    child.once("error", reject);
+  });
+}
+
+function refreshClaudeStatus() {
+  const resolved = resolveClaudeBinary();
+  const found = !!resolved;
+  const loggedIn = found ? isClaudeAuthenticated() : false;
+  return {
+    provider: "claude",
+    binaryFound: found,
+    binaryPath: resolved ? `${resolved.command} ${resolved.args.join(" ")}`.trim() : null,
+    binarySource: resolved ? resolved.source : null,
+    // Claude CLI versioning isn't gated by the app; treat any resolved CLI as ok.
+    version: found ? "cli" : null,
+    requiredVersion: "any",
+    versionOk: found,
+    loggedIn,
+    targetTriple: targetTriple(),
+  };
+}
+
 // ── Bundled binary fetch (when missing) ─────────────────────────────────
 // In the packaged app the codex binary should always be present, but if
 // it isn't (corrupted install, antivirus quarantine, etc.) we offer to
@@ -332,7 +520,18 @@ function ensureIpcHandlers() {
   ensureIpcHandlers._wired = true;
 
   ipcMain.handle("wizard:status", () => refreshCodexStatus());
+  ipcMain.handle("wizard:set-provider", (_e, provider) => {
+    setActiveProvider(provider);
+    sendStatus({ phase: "idle" });
+    return refreshCodexStatus();
+  });
   ipcMain.handle("wizard:install", async () => {
+    // Claude is bundled (or resolved from node_modules); there's no separate
+    // per-triple download step, so install is a no-op when Claude is active.
+    if (getActiveProvider() === "claude") {
+      sendStatus();
+      return refreshCodexStatus();
+    }
     const status = refreshCodexStatus();
     if (status.binaryFound && semverGte(status.version, REQUIRED_CODEX_VERSION)) {
       sendStatus();
@@ -352,10 +551,12 @@ function ensureIpcHandlers() {
   });
   ipcMain.handle("wizard:login", async () => {
     sendStatus({ phase: "logging-in", message: "Waiting for browser login…" });
+    const provider = getActiveProvider();
+    const driver = provider === "claude" ? runClaudeLogin : runCodexLogin;
     try {
-      const ok = await runCodexLogin((line) => {
+      const ok = await driver((line) => {
         // expose the auth URL if the binary prints one
-        const m = /(https?:\/\/[^\s]+auth[^\s]*)/i.exec(line);
+        const m = /(https?:\/\/[^\s]+(?:auth|login|oauth|callback)[^\s]*)/i.exec(line);
         if (m) {
           sendStatus({ phase: "logging-in", message: "Waiting for browser login…", authUrl: m[1] });
         }
@@ -531,7 +732,7 @@ function runCodexLogin(onLine) {
 // ── Status snapshot + subscribers ───────────────────────────────────────
 const statusSubscribers = new Set();
 
-function refreshCodexStatus() {
+function refreshCodexOnlyStatus() {
   const resolved = resolveCodexBinary();
   const bin = resolved ? resolved.path : null;
   const source = resolved ? resolved.source : null;
@@ -550,7 +751,8 @@ function refreshCodexStatus() {
     : (bin ? getCodexVersion(bin) : null);
   const versionOk = version ? semverGte(version, REQUIRED_CODEX_VERSION) : false;
   const loggedIn = bin && versionOk ? isCodexAuthenticated(bin) : false;
-  const status = {
+  return {
+    provider: "codex",
     binaryFound: !!bin,
     binaryPath: bin,
     binarySource: source,
@@ -560,6 +762,15 @@ function refreshCodexStatus() {
     loggedIn,
     targetTriple: targetTriple(),
   };
+}
+
+// Provider-aware status: reflects whichever engine the user has selected so
+// the wizard, the top-bar banner, and the readiness gate all agree. The field
+// names are stable across providers so existing consumers don't change.
+function refreshCodexStatus() {
+  const provider = getActiveProvider();
+  const status =
+    provider === "claude" ? refreshClaudeStatus() : refreshCodexOnlyStatus();
   for (const cb of statusSubscribers) {
     try {
       cb(status);
@@ -592,6 +803,8 @@ module.exports = {
   ensureCodexReady,
   showSetupWindow,
   resolveCodexBinary,
+  resolveClaudeBinary,
   refreshCodexStatus,
   onCodexStatusChange,
+  getActiveProvider,
 };

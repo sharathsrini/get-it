@@ -19,6 +19,7 @@ import { APP_VERSION } from "@/lib/version";
 export type SettingsPayload = {
   autoGenerate: boolean;
   maxRetries: number;
+  aiProvider: "codex" | "claude";
 };
 
 export const SETTINGS_EVENT = "getit:settings";
@@ -81,6 +82,7 @@ export default function SettingsButton() {
 function SettingsPanel({ refreshKey }: { refreshKey: string }) {
   const [autoGenerate, setAutoGenerate] = useState<boolean>(AUTO_GENERATE_VIZ);
   const [maxRetries, setMaxRetries] = useState<number>(MAX_VIZ_GEN_RETRIES);
+  const [aiProvider, setAiProvider] = useState<"codex" | "claude">("codex");
   const hydratedRef = useRef(false);
 
   // Fetch fresh on every popover open so external changes (CLI edits,
@@ -95,6 +97,8 @@ function SettingsPanel({ refreshKey }: { refreshKey: string }) {
         if (cancelled) return;
         if (typeof s.autoGenerate === "boolean") setAutoGenerate(s.autoGenerate);
         if (typeof s.maxRetries === "number") setMaxRetries(s.maxRetries);
+        if (s.aiProvider === "codex" || s.aiProvider === "claude")
+          setAiProvider(s.aiProvider);
         hydratedRef.current = true;
       })
       .catch(() => {
@@ -144,6 +148,20 @@ function SettingsPanel({ refreshKey }: { refreshKey: string }) {
     [persist],
   );
 
+  const onAiProvider = useCallback(
+    (v: "codex" | "claude") => {
+      setAiProvider(v);
+      persist({ aiProvider: v });
+      // If the newly-selected provider isn't signed in yet, the next AI call
+      // surfaces the auth banner; offer to (re-)run setup right away when the
+      // Electron bridge is available.
+      if (typeof window !== "undefined" && window.getit?.runCodexSetup) {
+        void window.getit.runCodexSetup().catch(() => {});
+      }
+    },
+    [persist],
+  );
+
   return (
     <>
       <div className="border-b border-[var(--border-subtle)] px-3 py-2">
@@ -161,6 +179,47 @@ function SettingsPanel({ refreshKey }: { refreshKey: string }) {
         <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--ink-400)]">
           Saved automatically. Your choice survives app restarts.
         </p>
+      </div>
+
+      {/* AI provider selector */}
+      <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
+        <p className="text-[12.5px] font-medium text-[var(--ink-900)]">
+          AI engine
+        </p>
+        <p className="mb-2 text-[11px] leading-relaxed text-[var(--ink-500)]">
+          Which account Get It.&apos;s agents run against. Sign in with the
+          subscription you already pay for — nothing is metered by Get It.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="AI engine"
+          className="flex gap-1.5 rounded-lg bg-[var(--surface-sunken)] p-1"
+        >
+          {(
+            [
+              { id: "codex", label: "OpenAI Codex" },
+              { id: "claude", label: "Anthropic Claude" },
+            ] as const
+          ).map((opt) => {
+            const active = aiProvider === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onAiProvider(opt.id)}
+                className={`flex-1 rounded-md px-2 py-1 text-[11.5px] font-medium transition-colors ${
+                  active
+                    ? "bg-white text-[var(--accent-700)] shadow-sm ring-1 ring-[var(--border-default)]"
+                    : "text-[var(--ink-500)] hover:text-[var(--ink-900)]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Auto-generate toggle */}
