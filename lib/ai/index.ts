@@ -58,7 +58,15 @@ export function getActiveProviderId(): AiProviderId {
 }
 
 export function getProvider(): AiProvider {
-  return PROVIDERS[getActiveProviderId()] ?? codexProvider;
+  const id = getActiveProviderId();
+  const provider = PROVIDERS[id];
+  if (!provider) {
+    // An unknown id should never reach here (settings coerce to a known value),
+    // but if it does, log it rather than silently masking a misconfiguration.
+    console.warn(`[ai] unknown provider id "${id}", falling back to codex`);
+    return codexProvider;
+  }
+  return provider;
 }
 
 export function runJson<T>(

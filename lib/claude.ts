@@ -34,10 +34,11 @@ import { CODEX_SCRATCH_DIR } from "./paths";
 
 /**
  * The model every generative call runs on, pinned explicitly — the analogue of
- * CODEX_MODEL. Keep this current with what Claude *subscription* auth allows.
- * When Anthropic retires it, ship an app update bumping this value (the in-app
- * "model unsupported" banner tells users exactly that). An alias ("sonnet") is
- * used so the CLI resolves the latest matching snapshot for the account.
+ * CODEX_MODEL. "sonnet" is an alias, not a dated snapshot: the CLI resolves it
+ * to the latest Sonnet snapshot the signed-in subscription is entitled to. Keep
+ * this current with what Claude *subscription* auth allows; when Anthropic
+ * retires the alias, ship an app update bumping this value (the in-app "model
+ * unsupported" banner tells users exactly that).
  */
 export const CLAUDE_MODEL = "sonnet";
 

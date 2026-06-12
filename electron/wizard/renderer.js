@@ -99,15 +99,17 @@ function render(s) {
         activeProvider === "claude"
           ? `Get It.'s bundled ${copy.cliName} is missing on this machine. Reinstalling the app restores it.`
           : `Get It.'s bundled ${copy.cliName} is missing on this machine.`;
-      els.btnInstall.disabled = activeProvider === "claude";
+      els.btnInstall.disabled = false;
       els.btnInstall.textContent = `Install ${copy.cliName}`;
+      // Claude ships bundled with no per-triple download, so there's nothing
+      // to install — hide the button entirely rather than show a dead control.
       els.btnInstall.hidden = activeProvider === "claude";
     } else {
       // binary present but version too old — only reachable for the
       // node_modules / userdata sources, since the bundled copy's
       // version is pinned at build time.
       els.installDesc.textContent = `The ${copy.cliName} on this machine is ${s.version ?? "an unknown version"}; Get It. needs ≥ ${s.requiredVersion}. Update?`;
-      els.btnInstall.disabled = activeProvider === "claude";
+      els.btnInstall.disabled = false;
       els.btnInstall.textContent = `Update ${copy.cliName}`;
       els.btnInstall.hidden = activeProvider === "claude";
     }
