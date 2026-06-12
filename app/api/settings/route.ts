@@ -31,6 +31,10 @@ export async function POST(req: Request) {
       typeof b.maxRetries === "number" && b.maxRetries >= 0
         ? b.maxRetries
         : current.maxRetries,
+    aiProvider:
+      b.aiProvider === "codex" || b.aiProvider === "claude"
+        ? b.aiProvider
+        : current.aiProvider,
   };
   saveSettings(next);
   return NextResponse.json(next);

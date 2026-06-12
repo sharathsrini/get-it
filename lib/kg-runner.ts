@@ -13,7 +13,7 @@
  * committed to disk so the client polls /api/kg/[docId]/state to observe.
  */
 
-import { runJson } from "./codex";
+import { runJson } from "./ai";
 import { getDoc } from "./store";
 import {
   emptyKG,

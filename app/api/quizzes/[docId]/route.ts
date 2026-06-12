@@ -19,7 +19,7 @@
 
 import { NextResponse } from "next/server";
 import { randomInt } from "node:crypto";
-import { runJson, toCodexErrorPayload } from "@/lib/codex";
+import { runJson, toCodexErrorPayload } from "@/lib/ai";
 import { getDoc } from "@/lib/store";
 import {
   loadWorkContext,

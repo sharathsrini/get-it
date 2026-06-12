@@ -7,7 +7,7 @@
  * persisting the result.
  */
 
-import { runJson } from "../codex";
+import { runJson } from "../ai";
 import {
   detectionBatchSchema,
   type DetectionBatchResult,

@@ -18,9 +18,14 @@ import path from "node:path";
 import { DATA_DIR } from "./paths";
 import { AUTO_GENERATE_VIZ, MAX_VIZ_GEN_RETRIES } from "./config";
 
+/** Which AI backend the app's agents run against. */
+export type AiProviderId = "codex" | "claude";
+
 export type AppSettings = {
   autoGenerate: boolean;
   maxRetries: number;
+  /** Active AI provider. Defaults to "codex" (OpenAI) for back-compat. */
+  aiProvider: AiProviderId;
 };
 
 const VERSION = 1 as const;
@@ -30,7 +35,12 @@ function defaultsFromEnv(): AppSettings {
   return {
     autoGenerate: AUTO_GENERATE_VIZ,
     maxRetries: MAX_VIZ_GEN_RETRIES,
+    aiProvider: "codex",
   };
+}
+
+function coerceProvider(v: unknown): AiProviderId | null {
+  return v === "codex" || v === "claude" ? v : null;
 }
 
 export function loadSettings(): AppSettings {
@@ -48,6 +58,7 @@ export function loadSettings(): AppSettings {
           typeof parsed.maxRetries === "number" && parsed.maxRetries >= 0
             ? Math.min(10, Math.floor(parsed.maxRetries))
             : env.maxRetries,
+        aiProvider: coerceProvider(parsed.aiProvider) ?? env.aiProvider,
       };
     }
   } catch {
@@ -62,6 +73,7 @@ export function saveSettings(s: AppSettings): void {
     savedAt: Date.now(),
     autoGenerate: !!s.autoGenerate,
     maxRetries: Math.min(10, Math.max(0, Math.floor(s.maxRetries))),
+    aiProvider: coerceProvider(s.aiProvider) ?? "codex",
   };
   const tmp = `${SETTINGS_PATH}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(file, null, 2));

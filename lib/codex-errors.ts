@@ -142,14 +142,14 @@ export function toCodexErrorPayload(err: unknown): {
   const e = err instanceof CodexError ? err : classifyCodexError(err);
   const friendly: Record<CodexErrorKind, string> = {
     rate_limit:
-      "Codex usage limit reached — see the notice at the top. Try again once it clears.",
+      "AI usage limit reached — see the notice at the top. Try again once it clears.",
     auth_lost:
-      "Codex isn't signed in. Reconnect from the notice at the top, then try again.",
+      "The AI engine isn't signed in. Reconnect from the notice at the top, then try again.",
     binary_missing:
-      "The Codex engine isn't available. Open the setup wizard, then try again.",
+      "The AI engine isn't available. Open the setup wizard, then try again.",
     model_unsupported:
       "This version of Get It uses a model that's no longer available. Download the latest Get It to fix this.",
-    generic: "Something went wrong talking to Codex. Please try again.",
+    generic: "Something went wrong talking to the AI engine. Please try again.",
   };
   return { kind: e.kind, message: friendly[e.kind] };
 }

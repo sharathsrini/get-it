@@ -14,7 +14,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { runJsonInThread, CodexError } from "@/lib/codex";
+import { runJsonInThread, CodexError } from "@/lib/ai";
 import { getDoc } from "@/lib/store";
 import {
   loadWorkContext,

@@ -16,7 +16,7 @@
  *     ONCE before returning, so the user never sees that round trip.
  */
 
-import { runJson } from "../codex";
+import { runJson } from "../ai";
 import { vizSchemaFor, type VizSpec, type VizType } from "../schemas";
 
 const LANGUAGE_RULE = `LANGUAGE

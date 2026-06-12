@@ -19,7 +19,14 @@ import { Codex } from "@openai/codex-sdk";
 import type { ThreadOptions } from "@openai/codex-sdk";
 import { CODEX_SCRATCH_DIR } from "./paths";
 import { CodexError, classifyCodexError } from "./codex-errors";
-import type { CodexErrorKind } from "./codex-errors";
+import {
+  getAiHealth,
+  markOk,
+  markError,
+  preflightHealth,
+  type AiHealth,
+} from "./ai/health";
+import { parseModelJson } from "./ai/json";
 
 // Pure error model + presentation live in codex-errors.ts (no SDK dependency,
 // so they're unit-testable). Re-export them here so callers keep importing
@@ -98,94 +105,18 @@ function buildThread(opts: RunOptions = {}) {
 
 /** Strip markdown code fences the model sometimes wraps JSON in, then parse. */
 function parseTurnJson<T>(finalResponse: string | undefined): T {
-  const text = finalResponse?.trim();
-  if (!text) throw new Error("Empty finalResponse from codex");
-  const cleaned = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```$/i, "")
-    .trim();
-  return JSON.parse(cleaned) as T;
+  return parseModelJson<T>(finalResponse);
 }
 
 // ── Health mailbox ──────────────────────────────────────────────────────
-// Process-local snapshot of the most recent CodexError. The UI polls
-// /api/codex/health to render a banner with a countdown + reconnect
-// button. We also use it to short-circuit calls while a rate limit is
-// still active — no point hammering the API.
-export type CodexHealth = {
-  ok: boolean;
-  kind: CodexErrorKind | null;
-  message: string | null;
-  retryAt: number | null;
-  window: "5h" | "weekly" | "unknown" | null;
-  /** Monotone counter — UI uses this to detect "a new error came in" vs
-   *  "still the same one I'm already showing". */
-  serial: number;
-  /** Last successful Codex call timestamp (epoch ms). */
-  lastOkAt: number | null;
-};
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __getitCodexHealth: CodexHealth | undefined;
-}
-
-const _initialHealth: CodexHealth = {
-  ok: true,
-  kind: null,
-  message: null,
-  retryAt: null,
-  window: null,
-  serial: 0,
-  lastOkAt: null,
-};
-
-const health: CodexHealth =
-  globalThis.__getitCodexHealth ??
-  (globalThis.__getitCodexHealth = { ..._initialHealth });
+// The health mailbox is provider-neutral and lives in lib/ai/health.ts so
+// both the Codex and Claude providers report into the same snapshot. We keep
+// the legacy `CodexHealth` type alias and `getCodexHealth` export here so
+// existing callers (e.g. /api/codex/health) keep working unchanged.
+export type CodexHealth = AiHealth;
 
 export function getCodexHealth(): CodexHealth {
-  // If a rate-limit retry deadline has passed, auto-clear so the UI
-  // stops showing the banner without a server round-trip.
-  if (
-    health.kind === "rate_limit" &&
-    health.retryAt != null &&
-    Date.now() >= health.retryAt
-  ) {
-    Object.assign(health, _initialHealth, { serial: health.serial });
-  }
-  return { ...health };
-}
-
-function markOk() {
-  if (!health.ok) {
-    Object.assign(health, _initialHealth, { serial: health.serial + 1 });
-  }
-  health.lastOkAt = Date.now();
-  health.ok = true;
-}
-
-function markError(err: CodexError) {
-  health.ok = false;
-  health.kind = err.kind;
-  health.message = err.message;
-  health.retryAt = err.retryAt ?? null;
-  health.window = err.window ?? null;
-  health.serial += 1;
-}
-
-function preflightHealth(): CodexError | null {
-  if (
-    health.kind === "rate_limit" &&
-    health.retryAt != null &&
-    Date.now() < health.retryAt
-  ) {
-    return new CodexError("rate_limit", health.message ?? "Rate limit active", {
-      retryAt: health.retryAt,
-      window: health.window ?? "unknown",
-    });
-  }
-  return null;
+  return getAiHealth();
 }
 
 /**
