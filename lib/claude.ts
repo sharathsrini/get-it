@@ -164,6 +164,9 @@ export function runClaudePrint(args: ClaudePrintArgs): Promise<ClaudePrintResult
     let stdout = "";
     let stderr = "";
     let settled = false;
+    // 180s default: schema-constrained agent turns over a full document can run
+    // well past a normal HTTP timeout, especially on the first (cold) call;
+    // callers can override per-run via args.timeoutMs.
     const timer = setTimeout(() => {
       if (settled) return;
       try {

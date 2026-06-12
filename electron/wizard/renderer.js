@@ -95,9 +95,13 @@ function render(s) {
     );
     els.stepInstall.classList.toggle("error", s.phase === "error");
     if (!s.binaryFound) {
-      els.installDesc.textContent = `Get It.'s bundled ${copy.cliName} is missing on this machine.`;
+      els.installDesc.textContent =
+        activeProvider === "claude"
+          ? `Get It.'s bundled ${copy.cliName} is missing on this machine. Reinstalling the app restores it.`
+          : `Get It.'s bundled ${copy.cliName} is missing on this machine.`;
       els.btnInstall.disabled = activeProvider === "claude";
       els.btnInstall.textContent = `Install ${copy.cliName}`;
+      els.btnInstall.hidden = activeProvider === "claude";
     } else {
       // binary present but version too old — only reachable for the
       // node_modules / userdata sources, since the bundled copy's
@@ -105,6 +109,7 @@ function render(s) {
       els.installDesc.textContent = `The ${copy.cliName} on this machine is ${s.version ?? "an unknown version"}; Get It. needs ≥ ${s.requiredVersion}. Update?`;
       els.btnInstall.disabled = activeProvider === "claude";
       els.btnInstall.textContent = `Update ${copy.cliName}`;
+      els.btnInstall.hidden = activeProvider === "claude";
     }
     if (s.phase === "installing") {
       els.installStatus.innerHTML = `<span class="spinner"></span>${escapeHtml(s.message || "Installing…")}`;

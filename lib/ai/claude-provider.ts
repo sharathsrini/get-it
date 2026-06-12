@@ -36,7 +36,7 @@ Respond with EXACTLY ONE JSON object and nothing else — no prose, no
 explanation, no markdown code fence. The object MUST validate against this
 JSON Schema:
 
-${JSON.stringify(outputSchema)}`;
+${JSON.stringify(outputSchema, null, 2)}`;
 }
 
 async function runOnce<T>(
