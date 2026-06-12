@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+    <title>Connect Claude</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #ffffff;
+        color: #111113;
+        padding: 28px 30px;
+      }
+      h1 { font-size: 18px; margin: 0 0 6px; }
+      p { font-size: 13px; line-height: 1.5; color: #4b4b52; margin: 0 0 14px; }
+      label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #6b6b73; margin-bottom: 6px; }
+      input[type="password"], input[type="text"] {
+        width: 100%;
+        font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 9px 10px;
+        border: 1px solid #d7d7dd;
+        border-radius: 8px;
+        outline: none;
+      }
+      input:focus { border-color: #6b5bd2; box-shadow: 0 0 0 3px rgba(107, 91, 210, 0.15); }
+      .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+      .row label { margin: 0; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; color: #4b4b52; }
+      .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+      button {
+        font-size: 13px;
+        font-weight: 600;
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid #d7d7dd;
+        background: #fff;
+        color: #111113;
+        cursor: pointer;
+      }
+      button.primary { background: #6b5bd2; border-color: #6b5bd2; color: #fff; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      a { color: #6b5bd2; }
+      .err { color: #c0392b; font-size: 12px; min-height: 16px; margin-top: 8px; }
+      .hint { font-size: 11.5px; color: #8a8a92; margin-top: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Connect Claude</h1>
+    <p>
+      Get It. uses Claude to power its study tools. Paste an Anthropic API key to
+      connect. It's stored only on this device and used to talk to Claude.
+    </p>
+
+    <label for="key">Anthropic API key</label>
+    <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+
+    <div class="row">
+      <input id="reveal" type="checkbox" />
+      <label for="reveal">Show key</label>
+    </div>
+
+    <div class="err" id="err"></div>
+
+    <div class="actions">
+      <button id="cancel" type="button">Cancel</button>
+      <button id="save" type="button" class="primary" disabled>Connect</button>
+    </div>
+
+    <p class="hint">
+      Need a key? Create one at
+      <a href="#" id="console-link">console.anthropic.com</a>.
+    </p>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const keyInput = $("key");
+      const saveBtn = $("save");
+      const err = $("err");
+
+      function looksLikeKey(v) {
+        return v.trim().length > 0;
+      }
+
+      keyInput.addEventListener("input", () => {
+        saveBtn.disabled = !looksLikeKey(keyInput.value);
+        err.textContent = "";
+      });
+
+      $("reveal").addEventListener("change", (e) => {
+        keyInput.type = e.target.checked ? "text" : "password";
+      });
+
+      $("console-link").addEventListener("click", (e) => {
+        e.preventDefault();
+        window.claudeKey?.openUrl("https://console.anthropic.com/settings/keys");
+      });
+
+      $("cancel").addEventListener("click", () => {
+        window.claudeKey?.cancel();
+      });
+
+      async function submit() {
+        const value = keyInput.value.trim();
+        if (!looksLikeKey(value)) return;
+        saveBtn.disabled = true;
+        err.textContent = "";
+        try {
+          const res = await window.claudeKey?.save(value);
+          if (!res || !res.ok) {
+            err.textContent = "Couldn't save the key. Please try again.";
+            saveBtn.disabled = false;
+          }
+          // On success the main process closes this window.
+        } catch {
+          err.textContent = "Couldn't save the key. Please try again.";
+          saveBtn.disabled = false;
+        }
+      }
+
+      saveBtn.addEventListener("click", submit);
+      keyInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+      });
+
+      keyInput.focus();
+    </script>
+  </body>
+</html>

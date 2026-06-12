@@ -81,6 +81,19 @@ function buildRequestParams(
   };
 }
 
+/**
+ * Read a single header off whatever shape the SDK hands us. Recent SDKs expose
+ * a Fetch `Headers` (needs `.get()`); older builds used a plain object. Handle
+ * both so a `retry-after` is never silently dropped.
+ */
+function readHeader(headers: unknown, name: string): string | null {
+  if (!headers) return null;
+  const get = (headers as { get?: (n: string) => string | null }).get;
+  if (typeof get === "function") return get.call(headers, name) ?? null;
+  const rec = headers as Record<string, string>;
+  return rec[name] ?? null;
+}
+
 /** Classify an error into a CodexError, handling Anthropic SDK typed errors first. */
 function classifyError(err: unknown): CodexError {
   if (err instanceof CodexError) return err;
@@ -88,8 +101,10 @@ function classifyError(err: unknown): CodexError {
     return new CodexError("auth_lost", err.message);
   }
   if (err instanceof Anthropic.RateLimitError) {
-    const headers = err.headers as unknown as Record<string, string> | undefined;
-    const retryAfter = headers?.["retry-after"];
+    // err.headers is a Fetch `Headers` object — read it with `.get()`, not
+    // index access (index access always returns undefined on Headers, which
+    // silently collapsed every rate-limit to the 60s default).
+    const retryAfter = readHeader(err.headers, "retry-after");
     const ms = retryAfter ? parseFloat(retryAfter) * 1000 : 60_000;
     return new CodexError("rate_limit", err.message, {
       retryAt: Date.now() + (isNaN(ms) ? 60_000 : ms),

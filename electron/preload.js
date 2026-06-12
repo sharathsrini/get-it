@@ -1,7 +1,11 @@
 /**
  * Preload — exposes a small, typed bridge so the renderer can ask the
- * main process whether Codex is healthy and ask it to re-run the setup
- * wizard. Nothing else crosses the boundary.
+ * main process whether Claude is connected and ask it to (re-)run the API
+ * key setup. Nothing else crosses the boundary.
+ *
+ * `runClaudeSetup` is the current name (used by the health banner);
+ * `runCodexSetup` / `getCodexStatus` are kept as aliases so older renderer
+ * code keeps working. Both map to the same Claude key flow in main.js.
  */
 
 "use strict";
@@ -10,8 +14,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("getit", {
   platform: process.platform,
-  getCodexStatus: () => ipcRenderer.invoke("codex:status"),
-  runCodexSetup: () => ipcRenderer.invoke("codex:setup"),
+  getCodexStatus: () => ipcRenderer.invoke("claude:status"),
+  runCodexSetup: () => ipcRenderer.invoke("claude:setup"),
+  runClaudeSetup: () => ipcRenderer.invoke("claude:setup"),
   onCodexStatus: (cb) => {
     const wrapped = (_e, status) => {
       try {

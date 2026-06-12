@@ -58,12 +58,12 @@ const fs = require("node:fs");
 const net = require("node:net");
 const http = require("node:http");
 const {
-  ensureCodexReady,
-  showSetupWindow,
-  resolveCodexBinary,
-  refreshCodexStatus,
-  onCodexStatusChange,
-} = require("./setup");
+  ensureClaudeReady,
+  showClaudeSetup,
+  resolveApiKey,
+  refreshClaudeStatus,
+  onClaudeStatusChange,
+} = require("./claude-setup");
 const { maybeRunUpdate } = require("./updater");
 const analytics = require("./analytics");
 
@@ -197,11 +197,11 @@ async function startEmbeddedServer() {
     HOSTNAME: "127.0.0.1",
     NODE_ENV: "production",
   };
-  // Tell the SDK where the codex binary actually is — when we bundle the
-  // platform-specific package outside the standalone trace, this lets it
-  // skip module resolution entirely.
-  const codexInfo = resolveCodexBinary();
-  if (codexInfo) env.CODEX_BINARY_PATH = codexInfo.path;
+  // Hand the embedded server the Claude API key (from our env, or the
+  // locally-stored key the user entered in the setup window). Every agent
+  // call reads it via `new Anthropic()`.
+  const apiKey = resolveApiKey();
+  if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
 
   const nodeBin = process.execPath; // Electron's own node — works for ES modules
   // Spawn the watchdog wrapper if it was copied next to server.js by
@@ -292,6 +292,24 @@ function stopEmbeddedServer() {
   setTimeout(() => killProcessTree(pid, "SIGKILL"), 120);
 }
 
+/**
+ * Stop and re-spawn the embedded server, then point the window at the new
+ * URL. Used after the user supplies/changes the Claude API key at runtime —
+ * the key is injected into the server's environment at spawn time, so a
+ * running server has to be replaced for a new key to take effect. No-op in
+ * dev (DEV_URL), where the server isn't ours to restart.
+ */
+async function restartEmbeddedServer() {
+  if (DEV_URL) return;
+  stopEmbeddedServer();
+  // Give the SIGTERM/SIGKILL sequence a moment to release the old port.
+  await new Promise((r) => setTimeout(r, 300));
+  await startEmbeddedServer();
+  if (mainWindow && !mainWindow.isDestroyed() && serverUrl) {
+    mainWindow.loadURL(serverUrl);
+  }
+}
+
 // ── Main window ─────────────────────────────────────────────────────────
 let mainWindow = null;
 
@@ -360,17 +378,26 @@ function createMainWindow() {
   mainWindow.loadURL(serverUrl);
 }
 
-// ── IPC: expose Codex status / refresh to the renderer ──────────────────
-// The setup module is the source of truth for codex state. The renderer
-// queries it through these IPC channels; updates push as `codex-status`
-// events.
-ipcMain.handle("codex:status", () => refreshCodexStatus());
-ipcMain.handle("codex:setup", async () => {
-  await showSetupWindow({ reason: "manual" });
-  return refreshCodexStatus();
-});
+// ── IPC: expose Claude connection status / setup to the renderer ────────
+// The claude-setup module is the source of truth for key state. The
+// renderer queries it through these IPC channels; updates push as
+// `codex-status` events. After the user enters a key at runtime we restart
+// the embedded server so it spawns with the new ANTHROPIC_API_KEY in its
+// environment, then reload the window onto the fresh server.
+async function handleClaudeSetup() {
+  const ok = await showClaudeSetup({ reason: "manual" });
+  if (ok) await restartEmbeddedServer();
+  return refreshClaudeStatus();
+}
 
-onCodexStatusChange((status) => {
+// `claude:setup` is the new channel; `codex:setup` is kept as an alias so the
+// existing preload bridge keeps working without a renderer rebuild.
+ipcMain.handle("claude:status", () => refreshClaudeStatus());
+ipcMain.handle("claude:setup", handleClaudeSetup);
+ipcMain.handle("codex:status", () => refreshClaudeStatus());
+ipcMain.handle("codex:setup", handleClaudeSetup);
+
+onClaudeStatusChange((status) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("codex-status", status);
   }
@@ -428,9 +455,10 @@ app.whenReady().then(async () => {
     // the app for use. Powers Total/Daily/Weekly/Monthly users.
     analytics.trackOpen();
 
-    // Run the codex wizard. We can't start the Next server without
-    // codex — the agents would crash on the first request.
-    const ok = await ensureCodexReady();
+    // Make sure we have a Claude API key before starting the Next server —
+    // the agents fail on the first request without one. Captured here so the
+    // key is in the server's environment when it spawns.
+    const ok = await ensureClaudeReady();
     if (!ok) {
       app.quit();
       return;
