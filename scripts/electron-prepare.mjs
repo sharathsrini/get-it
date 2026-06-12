@@ -247,6 +247,103 @@ function hostTarget() {
   return null;
 }
 
+// ── Anthropic CLI (`ant`) staging — powers the browser OAuth sign-in ──────
+// The desktop app shells out to `ant auth login`. We bundle one `ant` binary
+// per target at electron/ant-bin/<platform-arch>/ant(.exe); claude-setup.js
+// resolves it there at runtime (and falls back to an `ant` on PATH in dev).
+//
+// NOTE: the exact release version and asset names could not be verified from
+// the build sandbox (no GitHub access). The URL pattern follows the published
+// install docs. Override the version with ANT_CLI_VERSION, or skip staging
+// with SKIP_ANT_BUNDLE=1 (the app then relies on an `ant` already on PATH).
+const ANT_OS_ARCH_BY_TARGET = {
+  "darwin-arm64": ["darwin", "arm64"],
+  "darwin-x64": ["darwin", "amd64"],
+  "linux-arm64": ["linux", "arm64"],
+  "linux-x64": ["linux", "amd64"],
+  "win32-x64": ["windows", "amd64"],
+  "win32-arm64": ["windows", "arm64"],
+};
+
+function getRedirectLocation(url) {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, (res) => {
+        res.resume();
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          resolve(res.headers.location);
+        } else {
+          reject(new Error(`expected redirect from ${url}, got ${res.statusCode}`));
+        }
+      })
+      .on("error", reject);
+  });
+}
+
+async function resolveAntVersion() {
+  if (process.env.ANT_CLI_VERSION) return process.env.ANT_CLI_VERSION.replace(/^v/, "");
+  // /releases/latest 302-redirects to /releases/tag/v<version>.
+  const loc = await getRedirectLocation(
+    "https://github.com/anthropics/anthropic-cli/releases/latest",
+  );
+  const m = /\/tag\/v?([0-9][^/\s]*)/.exec(loc);
+  if (!m) throw new Error(`could not parse ant version from ${loc}`);
+  return m[1];
+}
+
+// Pull just the `ant`/`ant.exe` entry out of a (already gunzipped) ustar tar.
+function extractAntBinary(tarBuf, destFile, exeName) {
+  let offset = 0;
+  while (offset + 512 <= tarBuf.length) {
+    const header = tarBuf.subarray(offset, offset + 512);
+    if (header.every((b) => b === 0)) {
+      offset += 512;
+      continue;
+    }
+    const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, "");
+    const size = parseInt(header.subarray(124, 136).toString("utf8").replace(/\0.*$/, "").trim() || "0", 8);
+    const start = offset + 512;
+    if (path.basename(name) === exeName) {
+      fssync.mkdirSync(path.dirname(destFile), { recursive: true });
+      fssync.writeFileSync(destFile, tarBuf.subarray(start, start + size));
+      return true;
+    }
+    offset = start + size + ((512 - (size % 512)) % 512);
+  }
+  return false;
+}
+
+async function stageAnt(targetDir) {
+  if (process.env.SKIP_ANT_BUNDLE === "1") {
+    console.log("[electron-prepare] SKIP_ANT_BUNDLE=1 — not bundling the ant CLI.");
+    return;
+  }
+  const osArch = ANT_OS_ARCH_BY_TARGET[targetDir];
+  if (!osArch) {
+    console.warn(`[electron-prepare] no ant mapping for ${targetDir}, skipping.`);
+    return;
+  }
+  const [os, arch] = osArch;
+  const isWin = os === "windows";
+  const exeName = isWin ? "ant.exe" : "ant";
+  const destFile = path.join(REPO_ROOT, "electron", "ant-bin", targetDir, exeName);
+  if (fssync.existsSync(destFile)) {
+    console.log(`[electron-prepare] ant already staged for ${targetDir}.`);
+    return;
+  }
+  const version = await resolveAntVersion();
+  const asset = `ant_${version}_${os}_${arch}.tar.gz`;
+  const url = `https://github.com/anthropics/anthropic-cli/releases/download/v${version}/${asset}`;
+  console.log(`[electron-prepare] fetching ${url}…`);
+  const gz = await downloadBuffer(url);
+  const tar = zlib.gunzipSync(gz);
+  if (!extractAntBinary(tar, destFile, exeName)) {
+    throw new Error(`[electron-prepare] ${exeName} not found inside ${asset}`);
+  }
+  if (!isWin) fssync.chmodSync(destFile, 0o755);
+  console.log(`[electron-prepare] staged ant at electron/ant-bin/${targetDir}/${exeName}`);
+}
+
 async function main() {
   await syncStandaloneAssets();
   // If no explicit --target, stage the host binary so a plain
@@ -255,6 +352,7 @@ async function main() {
   const effective = target || hostTarget();
   if (effective) {
     await fetchPlatformPackage(effective);
+    await stageAnt(effective);
   }
 }
 

@@ -60,9 +60,14 @@ const http = require("node:http");
 const {
   ensureClaudeReady,
   showClaudeSetup,
-  resolveApiKey,
+  resolveServerAuth,
   refreshClaudeStatus,
   onClaudeStatusChange,
+  refreshToken,
+  startTokenBroker,
+  stopTokenBroker,
+  configDir: claudeConfigDir,
+  tokenFilePath: claudeTokenFilePath,
 } = require("./claude-setup");
 const { maybeRunUpdate } = require("./updater");
 const analytics = require("./analytics");
@@ -197,11 +202,23 @@ async function startEmbeddedServer() {
     HOSTNAME: "127.0.0.1",
     NODE_ENV: "production",
   };
-  // Hand the embedded server the Claude API key (from our env, or the
-  // locally-stored key the user entered in the setup window). Every agent
-  // call reads it via `new Anthropic()`.
-  const apiKey = resolveApiKey();
-  if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
+  // Give the embedded server its Claude credentials. Three modes:
+  //   • env      — ANTHROPIC_API_KEY is already inherited; nothing to do.
+  //   • api_key  — a stored pasted key; inject it.
+  //   • oauth    — browser-login token: strip any API key, point the server at
+  //     our OAuth config dir + the brokered token file, and keep that token
+  //     fresh on a timer (the server re-reads the file each call).
+  stopTokenBroker();
+  const auth = resolveServerAuth();
+  if (auth && auth.mode === "api_key") {
+    env.ANTHROPIC_API_KEY = auth.key;
+  } else if (auth && auth.mode === "oauth") {
+    delete env.ANTHROPIC_API_KEY;
+    refreshToken();
+    env.ANTHROPIC_CONFIG_DIR = claudeConfigDir();
+    env.GETIT_CLAUDE_TOKEN_FILE = claudeTokenFilePath();
+    startTokenBroker();
+  }
 
   const nodeBin = process.execPath; // Electron's own node — works for ES modules
   // Spawn the watchdog wrapper if it was copied next to server.js by
@@ -278,6 +295,8 @@ function killProcessTree(pid, signal = "SIGTERM") {
 }
 
 function stopEmbeddedServer() {
+  // Stop refreshing the OAuth token regardless of server state.
+  stopTokenBroker();
   if (!serverChild || serverChild.killed) return;
   const pid = serverChild.pid;
   serverChild = null;

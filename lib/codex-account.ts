@@ -1,8 +1,8 @@
 /**
  * Claude/Anthropic account information helpers.
  *
- *   readAccountInfo(): checks whether ANTHROPIC_API_KEY is set and returns
- *     a minimal info object. No network call.
+ *   readAccountInfo(): reports connection state — an API key (env/stored) or a
+ *     browser OAuth sign-in (a brokered bearer token file). No network call.
  *
  *   readRateLimits(): Anthropic does not expose a rate-limit introspection
  *     endpoint via API key auth; always returns null.
@@ -14,6 +14,8 @@
  * changes.
  */
 
+import { readFileSync } from "node:fs";
+
 export type CodexAccountInfo = {
   email: string | null;
   name: string | null;
@@ -24,16 +26,37 @@ export type CodexAccountInfo = {
 };
 
 export function readAccountInfo(): CodexAccountInfo | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  return {
-    email: null,
-    name: "Anthropic API",
-    planType: "api_key",
-    organizations: [],
-    subscriptionActiveUntil: null,
-    authMode: "api_key",
-  };
+  // API-key mode (web/dev or a stored key).
+  if ((process.env.ANTHROPIC_API_KEY || "").trim()) {
+    return {
+      email: null,
+      name: "Anthropic API",
+      planType: "api_key",
+      organizations: [],
+      subscriptionActiveUntil: null,
+      authMode: "api_key",
+    };
+  }
+  // OAuth mode (browser sign-in) — the Electron main process brokers a bearer
+  // token into this file. Its presence means we're connected.
+  const tokenFile = process.env.GETIT_CLAUDE_TOKEN_FILE;
+  if (tokenFile) {
+    try {
+      if (readFileSync(tokenFile, "utf-8").trim()) {
+        return {
+          email: null,
+          name: "Claude (signed in)",
+          planType: "oauth",
+          organizations: [],
+          subscriptionActiveUntil: null,
+          authMode: "oauth",
+        };
+      }
+    } catch {
+      /* no token yet */
+    }
+  }
+  return null;
 }
 
 export type CodexRateLimitWindow = {

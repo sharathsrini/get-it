@@ -12,120 +12,150 @@
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         background: #ffffff;
         color: #111113;
-        padding: 28px 30px;
+        padding: 30px 32px;
       }
-      h1 { font-size: 18px; margin: 0 0 6px; }
-      p { font-size: 13px; line-height: 1.5; color: #4b4b52; margin: 0 0 14px; }
-      label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #6b6b73; margin-bottom: 6px; }
-      input[type="password"], input[type="text"] {
-        width: 100%;
-        font-size: 13px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        padding: 9px 10px;
-        border: 1px solid #d7d7dd;
-        border-radius: 8px;
-        outline: none;
-      }
-      input:focus { border-color: #6b5bd2; box-shadow: 0 0 0 3px rgba(107, 91, 210, 0.15); }
-      .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-      .row label { margin: 0; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; color: #4b4b52; }
-      .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+      h1 { font-size: 19px; margin: 0 0 6px; }
+      p { font-size: 13px; line-height: 1.55; color: #4b4b52; margin: 0 0 16px; }
       button {
-        font-size: 13px;
+        font-size: 13.5px;
         font-weight: 600;
-        padding: 8px 16px;
-        border-radius: 8px;
+        padding: 10px 16px;
+        border-radius: 9px;
         border: 1px solid #d7d7dd;
         background: #fff;
         color: #111113;
         cursor: pointer;
       }
-      button.primary { background: #6b5bd2; border-color: #6b5bd2; color: #fff; }
-      button:disabled { opacity: 0.5; cursor: default; }
-      a { color: #6b5bd2; }
-      .err { color: #c0392b; font-size: 12px; min-height: 16px; margin-top: 8px; }
-      .hint { font-size: 11.5px; color: #8a8a92; margin-top: 14px; }
+      button.primary { background: #6b5bd2; border-color: #6b5bd2; color: #fff; width: 100%; padding: 12px; font-size: 14px; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      .muted { font-size: 12px; color: #8a8a92; }
+      a { color: #6b5bd2; cursor: pointer; }
+      .err { color: #c0392b; font-size: 12px; min-height: 16px; margin-top: 10px; }
+      .status { font-size: 12.5px; color: #4b4b52; margin-top: 12px; min-height: 16px; }
+      .divider { display: flex; align-items: center; gap: 10px; margin: 22px 0 16px; color: #b3b3ba; font-size: 11px; }
+      .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: #ececef; }
+      label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #6b6b73; margin-bottom: 6px; }
+      input[type="password"], input[type="text"] {
+        width: 100%; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 9px 10px; border: 1px solid #d7d7dd; border-radius: 8px; outline: none;
+      }
+      input:focus { border-color: #6b5bd2; box-shadow: 0 0 0 3px rgba(107,91,210,0.15); }
+      .hidden { display: none; }
+      .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+      .row label { margin: 0; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; color: #4b4b52; }
+      .keyactions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+      .cancel { margin-top: 18px; text-align: center; }
     </style>
   </head>
   <body>
     <h1>Connect Claude</h1>
-    <p>
-      Get It. uses Claude to power its study tools. Paste an Anthropic API key to
-      connect. It's stored only on this device and used to talk to Claude.
-    </p>
+    <p>Get It. uses Claude to power its study tools. Sign in with your Anthropic account to connect — a browser window will open for you to authorize.</p>
 
-    <label for="key">Anthropic API key</label>
-    <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
-
-    <div class="row">
-      <input id="reveal" type="checkbox" />
-      <label for="reveal">Show key</label>
-    </div>
-
+    <button id="signin" class="primary" type="button">Sign in with Claude</button>
+    <div class="status" id="status"></div>
     <div class="err" id="err"></div>
 
-    <div class="actions">
-      <button id="cancel" type="button">Cancel</button>
-      <button id="save" type="button" class="primary" disabled>Connect</button>
+    <div class="divider">OR</div>
+
+    <p class="muted" id="key-toggle-wrap"><a id="key-toggle">Use an API key instead</a></p>
+
+    <div id="key-panel" class="hidden">
+      <label for="key">Anthropic API key</label>
+      <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+      <div class="row">
+        <input id="reveal" type="checkbox" /><label for="reveal">Show key</label>
+      </div>
+      <p class="muted">Need a key? Create one at <a id="console-link">console.anthropic.com</a>.</p>
+      <div class="keyactions">
+        <button id="save" type="button" class="primary" style="width:auto" disabled>Connect</button>
+      </div>
     </div>
 
-    <p class="hint">
-      Need a key? Create one at
-      <a href="#" id="console-link">console.anthropic.com</a>.
-    </p>
+    <div class="cancel"><a id="cancel" class="muted">Cancel</a></div>
 
     <script>
       const $ = (id) => document.getElementById(id);
-      const keyInput = $("key");
-      const saveBtn = $("save");
+      const status = $("status");
       const err = $("err");
+      const signin = $("signin");
 
-      function looksLikeKey(v) {
-        return v.trim().length > 0;
+      function setBusy(busy, msg) {
+        signin.disabled = busy;
+        status.textContent = msg || "";
       }
 
-      keyInput.addEventListener("input", () => {
-        saveBtn.disabled = !looksLikeKey(keyInput.value);
+      $("signin").addEventListener("click", async () => {
         err.textContent = "";
+        setBusy(true, "Opening your browser… complete the sign-in there, then return here.");
+        try {
+          const res = await window.claudeAuth?.login();
+          if (!res || !res.ok) {
+            err.textContent = "Sign-in didn't complete. Please try again.";
+            setBusy(false, "");
+          }
+          // On success the main process closes this window.
+        } catch {
+          err.textContent = "Sign-in failed. Please try again.";
+          setBusy(false, "");
+        }
       });
 
+      // If ant printed an authorize URL (browser didn't auto-open), expose it.
+      window.claudeAuth?.onProgress((p) => {
+        if (p && p.authUrl) {
+          status.innerHTML = 'If no browser opened, <a id="auth-url">click here to authorize</a>.';
+          const link = document.getElementById("auth-url");
+          if (link) link.addEventListener("click", () => window.claudeAuth?.openUrl(p.authUrl));
+        }
+      });
+
+      // API-key fallback
+      $("key-toggle").addEventListener("click", () => {
+        $("key-panel").classList.toggle("hidden");
+        $("key").focus();
+      });
+      const keyInput = $("key");
+      const saveBtn = $("save");
+      keyInput.addEventListener("input", () => {
+        saveBtn.disabled = keyInput.value.trim().length === 0;
+        err.textContent = "";
+      });
       $("reveal").addEventListener("change", (e) => {
         keyInput.type = e.target.checked ? "text" : "password";
       });
-
-      $("console-link").addEventListener("click", (e) => {
-        e.preventDefault();
-        window.claudeKey?.openUrl("https://console.anthropic.com/settings/keys");
-      });
-
-      $("cancel").addEventListener("click", () => {
-        window.claudeKey?.cancel();
-      });
-
-      async function submit() {
-        const value = keyInput.value.trim();
-        if (!looksLikeKey(value)) return;
+      $("console-link").addEventListener("click", () =>
+        window.claudeAuth?.openUrl("https://console.anthropic.com/settings/keys"),
+      );
+      async function saveKey() {
+        const v = keyInput.value.trim();
+        if (!v) return;
         saveBtn.disabled = true;
         err.textContent = "";
         try {
-          const res = await window.claudeKey?.save(value);
+          const res = await window.claudeAuth?.saveKey(v);
           if (!res || !res.ok) {
             err.textContent = "Couldn't save the key. Please try again.";
             saveBtn.disabled = false;
           }
-          // On success the main process closes this window.
         } catch {
           err.textContent = "Couldn't save the key. Please try again.";
           saveBtn.disabled = false;
         }
       }
-
-      saveBtn.addEventListener("click", submit);
+      saveBtn.addEventListener("click", saveKey);
       keyInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") submit();
+        if (e.key === "Enter") saveKey();
       });
 
-      keyInput.focus();
+      $("cancel").addEventListener("click", () => window.claudeAuth?.cancel());
+
+      // If the bundled CLI is missing, steer the user to the key path.
+      const params = new URLSearchParams(location.search);
+      if (params.get("ant") === "0") {
+        signin.disabled = true;
+        status.textContent = "Browser sign-in is unavailable on this install — use an API key below.";
+        $("key-panel").classList.remove("hidden");
+      }
     </script>
   </body>
 </html>

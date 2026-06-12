@@ -12,6 +12,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam } from "@anthropic-ai/sdk/resources";
+import fs from "node:fs";
 import { CodexError, classifyCodexError } from "./codex-errors";
 import type { CodexErrorKind } from "./codex-errors";
 
@@ -28,11 +29,56 @@ export type { CodexErrorKind } from "./codex-errors";
 /** The Claude model every generative call runs on, pinned explicitly. */
 export const CODEX_MODEL = "claude-opus-4-8";
 
+// Beta header that marks a request as authenticated with an OAuth bearer
+// token (from `ant auth login`) rather than an API key. /v1/messages rejects
+// OAuth tokens without it.
+const OAUTH_BETA = "oauth-2025-04-20";
+
 let _client: Anthropic | null = null;
+// The token the cached client was built with, or null for API-key/bare mode —
+// lets us detect a refreshed OAuth token and rebuild the client.
+let _clientToken: string | null = null;
+
+/**
+ * In the packaged desktop app the user authenticates via a browser OAuth flow
+ * (`ant auth login`); the Electron main process brokers a short-lived bearer
+ * token into this file and refreshes it. We re-read it per construction so a
+ * refreshed token is picked up without restarting this server.
+ */
+function readBrokeredToken(): string | null {
+  const p = process.env.GETIT_CLAUDE_TOKEN_FILE;
+  if (!p) return null;
+  try {
+    return fs.readFileSync(p, "utf-8").trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 function getClient(): Anthropic {
-  if (_client) return _client;
+  // API-key mode (web/dev, or a stored key) — let the SDK resolve
+  // ANTHROPIC_API_KEY. Takes precedence over a brokered OAuth token.
+  if ((process.env.ANTHROPIC_API_KEY || "").trim()) {
+    if (_client && _clientToken === null) return _client;
+    _client = new Anthropic();
+    _clientToken = null;
+    return _client;
+  }
+  // OAuth-token mode — authenticate with the brokered bearer token.
+  const token = readBrokeredToken();
+  if (token) {
+    if (_client && _clientToken === token) return _client;
+    _client = new Anthropic({
+      authToken: token,
+      defaultHeaders: { "anthropic-beta": OAUTH_BETA },
+    });
+    _clientToken = token;
+    return _client;
+  }
+  // Neither — a bare client so the SDK surfaces a clear authentication error.
+  if (_client && _clientToken === null) return _client;
   _client = new Anthropic();
+  _clientToken = null;
   return _client;
 }
 
