@@ -1,9 +1,9 @@
 /**
- * Pure Codex error model — classification + presentation, with no dependency
- * on the Codex SDK or the runtime health mailbox. Kept separate from `codex.ts`
- * so this (deterministic, side-effect-free) logic can be unit-tested without
- * loading the SDK or touching the filesystem. `codex.ts` re-exports everything
- * here, so callers keep importing from `@/lib/codex`.
+ * Pure error model for Claude/Anthropic calls — classification + presentation,
+ * with no dependency on the Anthropic SDK or the runtime health mailbox. Kept
+ * separate from `codex.ts` so this (deterministic, side-effect-free) logic can
+ * be unit-tested in isolation. `codex.ts` re-exports everything here, so
+ * callers keep importing from `@/lib/codex`.
  */
 
 /**
@@ -12,10 +12,10 @@
  * raw message but the banner won't claim a rate-limit when there isn't one.
  */
 export type CodexErrorKind =
-  | "auth_lost" // user is not logged in (or token revoked)
-  | "rate_limit" // hit the 5h or weekly window
-  | "binary_missing" // the codex binary itself can't be found
-  | "model_unsupported" // the pinned model was retired server-side → update the app
+  | "auth_lost" // ANTHROPIC_API_KEY missing, invalid, or revoked
+  | "rate_limit" // hit Anthropic's rate limit
+  | "binary_missing" // kept for backward compat with stored work-context; never emitted
+  | "model_unsupported" // the pinned model is unavailable → update the app
   | "generic";
 
 export class CodexError extends Error {
@@ -52,14 +52,10 @@ const RX_RATE_LIMIT =
 const RX_TRY_AGAIN_SECONDS = /try again in\s*(\d+(?:\.\d+)?)\s*(s|ms|seconds?)/i;
 const RX_TRY_AGAIN_MIN = /try again in\s*(\d+(?:\.\d+)?)\s*(m|mins?|minutes?)/i;
 const RX_TRY_AGAIN_HOUR = /try again in\s*(\d+(?:\.\d+)?)\s*(h|hrs?|hours?)/i;
-const RX_AUTH = /(not logged in|please.*log ?in|unauthori[sz]ed|401|invalid api key|token (?:has )?expired|sign in)/i;
+const RX_AUTH = /(not logged in|please.*log ?in|unauthori[sz]ed|401|invalid api key|invalid x-api-key|token (?:has )?expired|sign in|api_key)/i;
 const RX_BINARY = /(unable to locate codex|cannot find module|enoent.*codex|codex.*not found|spawn .* enoent)/i;
-// OpenAI rejects a retired/unavailable model for ChatGPT-account auth, e.g.
-// "The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT
-// account." This means the model this build pins has aged out server-side and
-// the user needs a newer Get It. Matched before the generic catch-all.
 const RX_MODEL_UNSUPPORTED =
-  /model is not supported|is not supported when using codex|model_not_found|(?:unknown|unsupported|deprecated|retired) model|model.{0,20}(?:is )?(?:no longer|not) (?:available|supported)/i;
+  /model is not supported|model_not_found|(?:unknown|unsupported|deprecated|retired) model|model.{0,20}(?:is )?(?:no longer|not) (?:available|supported)/i;
 const RX_WEEKLY = /\bweekly\b/i;
 const RX_FIVE_H = /\b(5\s*h|5\s*hour|five hour)\b/i;
 
@@ -76,12 +72,13 @@ const RX_FIVE_H = /\b(5\s*h|5\s*hour|five hour)\b/i;
 export const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 
 export function classifyCodexError(err: unknown): CodexError {
+  if (err instanceof CodexError) return err;
   const msg =
     err instanceof Error
       ? err.message
       : typeof err === "string"
         ? err
-        : "Codex call failed";
+        : "Claude call failed";
 
   if (RX_BINARY.test(msg)) {
     return new CodexError("binary_missing", msg);
@@ -142,14 +139,14 @@ export function toCodexErrorPayload(err: unknown): {
   const e = err instanceof CodexError ? err : classifyCodexError(err);
   const friendly: Record<CodexErrorKind, string> = {
     rate_limit:
-      "Codex usage limit reached — see the notice at the top. Try again once it clears.",
+      "Claude rate limit reached — see the notice at the top. Try again once it clears.",
     auth_lost:
-      "Codex isn't signed in. Reconnect from the notice at the top, then try again.",
+      "Claude API key missing or invalid. Set ANTHROPIC_API_KEY and restart, then try again.",
     binary_missing:
-      "The Codex engine isn't available. Open the setup wizard, then try again.",
+      "The AI engine isn't available. Check your configuration and try again.",
     model_unsupported:
-      "This version of Get It uses a model that's no longer available. Download the latest Get It to fix this.",
-    generic: "Something went wrong talking to Codex. Please try again.",
+      "This version of Get It uses a Claude model that's no longer available. Download the latest Get It to fix this.",
+    generic: "Something went wrong talking to Claude. Please try again.",
   };
   return { kind: e.kind, message: friendly[e.kind] };
 }

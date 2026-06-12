@@ -80,7 +80,7 @@ export default function AccountButton() {
         </button>
         {!open && (
           <span className="viz-tooltip" role="tooltip">
-            Your ChatGPT account, usage limits and sign-out.
+            Claude API status and sign-out.
           </span>
         )}
       </span>
@@ -139,7 +139,7 @@ function AccountPanel({ refreshKey }: { refreshKey: string }) {
     if (loggingOut) return;
     if (
       !confirm(
-        "Sign out of Codex? Your library and study data stay on this device.",
+        "Clear Claude API connection? Your library and study data stay on this device.",
       )
     ) {
       return;
@@ -150,13 +150,6 @@ function AccountPanel({ refreshKey }: { refreshKey: string }) {
     } catch {
       /* ignore */
     }
-    if (typeof window !== "undefined" && window.getit?.runCodexSetup) {
-      try {
-        await window.getit.runCodexSetup();
-      } catch {
-        /* ignore */
-      }
-    }
     setLoggingOut(false);
   }, [loggingOut]);
 
@@ -164,13 +157,13 @@ function AccountPanel({ refreshKey }: { refreshKey: string }) {
     <div className="px-3 py-2.5">
       <div className="flex items-center justify-between">
         <p className="text-[10.5px] font-semibold uppercase tracking-wider text-[var(--ink-500)]">
-          ChatGPT account
+          Claude API
         </p>
         <button
           type="button"
           onClick={handleLogout}
           disabled={loggingOut || (!data?.account && !err)}
-          title="Sign out of Codex and return to the setup wizard"
+          title="Clear Claude API key configuration"
           className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-white px-2 py-0.5 text-[10.5px] font-medium text-[var(--ink-700)] transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
         >
           {loggingOut ? (
@@ -185,7 +178,7 @@ function AccountPanel({ refreshKey }: { refreshKey: string }) {
       {loading && (
         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[var(--ink-400)]">
           <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent-600)]" />
-          fetching from Codex…
+          loading…
         </div>
       )}
 

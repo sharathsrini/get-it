@@ -1,29 +1,23 @@
 /**
- * Thin wrapper around @openai/codex-sdk that gives us:
- *   - lazily-initialized singleton
- *   - sane defaults for "answer-only" mode (read-only sandbox, no approvals,
- *     web search off by default)
- *   - a `runJson` helper that runs a one-shot turn against an output-schema
- *     and returns the parsed JSON, with retry-on-parse-failure
+ * Thin wrapper around @anthropic-ai/sdk that gives us:
+ *   - lazily-initialized singleton (API key from ANTHROPIC_API_KEY env var)
+ *   - a `runJson` helper that runs a one-shot prompt and returns parsed JSON,
+ *     with retry-on-parse-failure
+ *   - thread-like multi-turn support for chat via serialized message history
+ *     encoded in the threadId string
  *   - structured CodexError classification (auth lost vs rate-limit vs
- *     generic). Every agent call funnels through here, so the rest of the
+ *     generic). Every agent call funnels through here so the rest of the
  *     app gets a single, stable shape to display.
- *
- * Note on the Codex binary: in packaged Electron builds the main process
- * resolves the bundled binary and exposes its absolute path through
- * CODEX_BINARY_PATH. Passing that path to the SDK avoids fragile
- * node_modules lookup from the standalone Next server.
  */
 
-import { Codex } from "@openai/codex-sdk";
-import type { ThreadOptions } from "@openai/codex-sdk";
-import { CODEX_SCRATCH_DIR } from "./paths";
+import Anthropic from "@anthropic-ai/sdk";
+import type { MessageParam } from "@anthropic-ai/sdk/resources";
 import { CodexError, classifyCodexError } from "./codex-errors";
 import type { CodexErrorKind } from "./codex-errors";
 
 // Pure error model + presentation live in codex-errors.ts (no SDK dependency,
 // so they're unit-testable). Re-export them here so callers keep importing
-// the whole Codex surface from "@/lib/codex".
+// the whole surface from "@/lib/codex".
 export {
   CodexError,
   classifyCodexError,
@@ -31,102 +25,100 @@ export {
 } from "./codex-errors";
 export type { CodexErrorKind } from "./codex-errors";
 
-/**
- * The model every generative call runs on, pinned explicitly.
- *
- * Why pin it: the SDK only passes `--model` to the codex binary when we set
- * this option. If we leave it unset, the binary resolves the model itself —
- * first from the user's personal `~/.codex/config.toml`, then from a default
- * baked into the bundled binary. That bundled default is a now-retired model
- * (`gpt-5.3-codex`), which OpenAI rejects for ChatGPT-account auth with a 400
- * ("model is not supported when using Codex with a ChatGPT account"). It only
- * appeared to work for developers because their local `config.toml` happened
- * to override the default with a current model; users with a clean `~/.codex`
- * fell through to the dead default. Pinning here makes every install — across
- * OS, arch, and environment — deterministically use the same supported model,
- * independent of the binary's default and of any local config.
- *
- * Keep this current with the models available to ChatGPT-account auth. When
- * OpenAI retires it, ship an app update bumping this value (the in-app
- * "model unsupported" banner tells users exactly that).
- */
-export const CODEX_MODEL = "gpt-5.5";
+/** The Claude model every generative call runs on, pinned explicitly. */
+export const CODEX_MODEL = "claude-opus-4-8";
 
-let _codex: Codex | null = null;
+let _client: Anthropic | null = null;
 
-function getCodex(): Codex {
-  if (_codex) return _codex;
-  const codexPathOverride = process.env.CODEX_BINARY_PATH;
-  _codex = new Codex({
-    ...(codexPathOverride ? { codexPathOverride } : {}),
-    config: {
-      // disable image generation so we can use 'low' reasoning; the demo is
-      // text-only so there is nothing to lose.
-      tools: { image_gen: false },
-    },
-  });
-  return _codex;
+function getClient(): Anthropic {
+  if (_client) return _client;
+  _client = new Anthropic();
+  return _client;
 }
 
 export type RunOptions = {
-  /** Defaults to "low" — fastest answer-only model setting that allows tools=image_gen=false. */
+  /** Reasoning depth: "low" = no extended thinking, "medium"/"high" = adaptive thinking. */
   reasoning?: "low" | "medium" | "high";
-  /** Allow live web search for this call (e.g. legal citations). */
-  webSearch?: boolean;
-  /** AbortSignal forwarded to the underlying child process. */
+  /** AbortSignal forwarded to the underlying HTTP request. */
   signal?: AbortSignal;
-  /** Override default thread options. */
-  threadOverrides?: Partial<ThreadOptions>;
+  /** Kept for API compatibility; web search is not available via Claude API. */
+  webSearch?: boolean;
+  /** Kept for API compatibility; ignored. */
+  threadOverrides?: Record<string, unknown>;
 };
 
-function threadOptions(opts: RunOptions = {}): ThreadOptions {
-  return {
-    model: CODEX_MODEL,
-    sandboxMode: "read-only",
-    approvalPolicy: "never",
-    skipGitRepoCheck: true,
-    workingDirectory: CODEX_SCRATCH_DIR,
-    modelReasoningEffort: opts.reasoning ?? "low",
-    webSearchEnabled: opts.webSearch ?? false,
-    ...(opts.threadOverrides ?? {}),
-  };
-}
-
-function buildThread(opts: RunOptions = {}) {
-  return getCodex().startThread(threadOptions(opts));
+/** Extract only text blocks from a Claude response (thinking blocks are skipped). */
+function extractText(response: Anthropic.Message): string {
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  if (!text) throw new Error("Empty response from Claude");
+  return text;
 }
 
 /** Strip markdown code fences the model sometimes wraps JSON in, then parse. */
-function parseTurnJson<T>(finalResponse: string | undefined): T {
-  const text = finalResponse?.trim();
-  if (!text) throw new Error("Empty finalResponse from codex");
-  const cleaned = text
+function parseTurnJson<T>(text: string): T {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("Empty response from Claude");
+  const cleaned = trimmed
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```$/i, "")
+    .replace(/```\s*$/i, "")
     .trim();
   return JSON.parse(cleaned) as T;
 }
 
+function buildRequestParams(
+  messages: MessageParam[],
+  opts: RunOptions,
+): Anthropic.MessageCreateParamsNonStreaming {
+  const useThinking = (opts.reasoning ?? "low") !== "low";
+  return {
+    model: CODEX_MODEL,
+    max_tokens: useThinking ? 16384 : 8192,
+    ...(useThinking ? { thinking: { type: "adaptive" as const } } : {}),
+    messages,
+  };
+}
+
+/** Classify an error into a CodexError, handling Anthropic SDK typed errors first. */
+function classifyError(err: unknown): CodexError {
+  if (err instanceof CodexError) return err;
+  if (err instanceof Anthropic.AuthenticationError) {
+    return new CodexError("auth_lost", err.message);
+  }
+  if (err instanceof Anthropic.RateLimitError) {
+    const headers = err.headers as unknown as Record<string, string> | undefined;
+    const retryAfter = headers?.["retry-after"];
+    const ms = retryAfter ? parseFloat(retryAfter) * 1000 : 60_000;
+    return new CodexError("rate_limit", err.message, {
+      retryAt: Date.now() + (isNaN(ms) ? 60_000 : ms),
+      window: "unknown",
+    });
+  }
+  if (err instanceof Anthropic.BadRequestError && /model/i.test(err.message)) {
+    return new CodexError("model_unsupported", err.message);
+  }
+  return classifyCodexError(err);
+}
+
 // ── Health mailbox ──────────────────────────────────────────────────────
-// Process-local snapshot of the most recent CodexError. The UI polls
+// Process-local snapshot of the most recent error. The UI polls
 // /api/codex/health to render a banner with a countdown + reconnect
-// button. We also use it to short-circuit calls while a rate limit is
-// still active — no point hammering the API.
+// button. We also short-circuit calls while a rate limit is still active.
 export type CodexHealth = {
   ok: boolean;
   kind: CodexErrorKind | null;
   message: string | null;
   retryAt: number | null;
   window: "5h" | "weekly" | "unknown" | null;
-  /** Monotone counter — UI uses this to detect "a new error came in" vs
-   *  "still the same one I'm already showing". */
+  /** Monotone counter — UI uses this to detect "a new error came in". */
   serial: number;
-  /** Last successful Codex call timestamp (epoch ms). */
+  /** Last successful Claude call timestamp (epoch ms). */
   lastOkAt: number | null;
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __getitCodexHealth: CodexHealth | undefined;
 }
 
@@ -145,8 +137,6 @@ const health: CodexHealth =
   (globalThis.__getitCodexHealth = { ..._initialHealth });
 
 export function getCodexHealth(): CodexHealth {
-  // If a rate-limit retry deadline has passed, auto-clear so the UI
-  // stops showing the banner without a server round-trip.
   if (
     health.kind === "rate_limit" &&
     health.retryAt != null &&
@@ -189,65 +179,60 @@ function preflightHealth(): CodexError | null {
 }
 
 /**
- * Run a single turn that must return JSON conforming to the supplied schema.
- * Retries once if the model returns un-parseable text. Throws CodexError on
- * failure so callers can pattern-match on `.kind`.
+ * Run a single turn that must return JSON. Retries once if the model returns
+ * un-parseable text. Throws CodexError on failure so callers can
+ * pattern-match on `.kind`.
+ *
+ * The `outputSchema` parameter is preserved for API compatibility — callers
+ * already embed "Output JSON" instructions in their prompts, so Claude
+ * complies without a server-enforced schema constraint.
  */
 export async function runJson<T>(
   prompt: string,
-  outputSchema: object,
+  _outputSchema: object,
   opts: RunOptions = {},
 ): Promise<{ data: T; usage: unknown }> {
-  // Short-circuit: if we know we're inside a rate-limit window, fail fast
-  // without burning another Codex call.
   const preflight = preflightHealth();
   if (preflight) throw preflight;
 
+  const messages: MessageParam[] = [{ role: "user", content: prompt }];
+
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const thread = buildThread(opts);
     try {
-      const turn = await thread.run(prompt, {
-        outputSchema,
-        signal: opts.signal,
-      });
-      const parsed = parseTurnJson<T>(turn.finalResponse);
+      const response = await getClient().messages.create(
+        buildRequestParams(messages, opts),
+        { signal: opts.signal },
+      );
+      const text = extractText(response);
+      const parsed = parseTurnJson<T>(text);
       markOk();
-      return { data: parsed, usage: turn.usage };
+      return { data: parsed, usage: response.usage };
     } catch (err) {
       lastErr = err;
-      const classified = classifyCodexError(err);
-      // Auth/rate-limit/binary failures: don't bother retrying — the
-      // condition isn't going to clear in 200ms. Bubble up immediately so
-      // the in-app banner can take over.
+      const classified = classifyError(err);
       if (classified.kind !== "generic") {
         markError(classified);
         throw classified;
       }
     }
   }
-  const finalErr = classifyCodexError(lastErr);
+  const finalErr = classifyError(lastErr);
   if (finalErr.kind !== "generic") markError(finalErr);
   throw finalErr;
 }
 
 /**
- * Thread-aware JSON runner for multi-turn tools (chat).
+ * Multi-turn JSON runner for chat.
  *
- * Two modes, exactly one of which must be supplied:
- *   • start  — open a NEW thread and send the full first-turn prompt (system
- *              + document + history). Returns the new `threadId` to persist.
- *              Retries once on a parse blip, like runJson.
- *   • resume — continue an EXISTING thread by `threadId`, sending only the new
- *              turn input. The model still has the document + prior turns in
- *              its own context, so we don't resend them (and the stable prefix
- *              is a guaranteed cache hit). No internal retry: on any generic
- *              failure (including a lost/expired session) the caller falls
- *              back to `start` with full context, so a resume never silently
- *              degrades the answer.
+ * Since the Anthropic API is stateless, conversation history is encoded as a
+ * base64 JSON message list in the threadId. On `start`, a new conversation is
+ * opened; on `resume`, the prior messages are decoded and the new turn
+ * appended before sending.
  *
- * Rate-limit / auth / binary errors are classified and thrown immediately in
- * both modes so the health banner takes over.
+ * Old Codex thread IDs (UUIDs) will fail to decode as base64 JSON and throw a
+ * generic error, causing the chat route's fallback to the full-context `start`
+ * path, which handles the transition transparently.
  */
 export async function runJsonInThread<T>(args: {
   outputSchema: object;
@@ -260,17 +245,35 @@ export async function runJsonInThread<T>(args: {
   const opts = args.opts ?? {};
 
   if (args.resume) {
-    const thread = getCodex().resumeThread(args.resume.threadId, threadOptions(opts));
+    let priorMessages: MessageParam[];
     try {
-      const turn = await thread.run(args.resume.input, {
-        outputSchema: args.outputSchema,
-        signal: opts.signal,
-      });
-      const parsed = parseTurnJson<T>(turn.finalResponse);
+      priorMessages = JSON.parse(
+        Buffer.from(args.resume.threadId, "base64").toString("utf-8"),
+      ) as MessageParam[];
+      if (!Array.isArray(priorMessages)) throw new Error("not an array");
+    } catch {
+      throw new CodexError("generic", "thread state unreadable; rebuild required");
+    }
+    const messages: MessageParam[] = [
+      ...priorMessages,
+      { role: "user", content: args.resume.input },
+    ];
+    try {
+      const response = await getClient().messages.create(
+        buildRequestParams(messages, opts),
+        { signal: opts.signal },
+      );
+      const text = extractText(response);
+      const parsed = parseTurnJson<T>(text);
       markOk();
-      return { data: parsed, usage: turn.usage, threadId: thread.id ?? args.resume.threadId };
+      const updated: MessageParam[] = [...messages, { role: "assistant", content: text }];
+      return {
+        data: parsed,
+        usage: response.usage,
+        threadId: Buffer.from(JSON.stringify(updated)).toString("base64"),
+      };
     } catch (err) {
-      const classified = classifyCodexError(err);
+      const classified = classifyError(err);
       if (classified.kind !== "generic") markError(classified);
       throw classified;
     }
@@ -280,25 +283,31 @@ export async function runJsonInThread<T>(args: {
 
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const thread = buildThread(opts);
+    const messages: MessageParam[] = [{ role: "user", content: args.start.input }];
     try {
-      const turn = await thread.run(args.start.input, {
-        outputSchema: args.outputSchema,
-        signal: opts.signal,
-      });
-      const parsed = parseTurnJson<T>(turn.finalResponse);
+      const response = await getClient().messages.create(
+        buildRequestParams(messages, opts),
+        { signal: opts.signal },
+      );
+      const text = extractText(response);
+      const parsed = parseTurnJson<T>(text);
       markOk();
-      return { data: parsed, usage: turn.usage, threadId: thread.id };
+      const updated: MessageParam[] = [...messages, { role: "assistant", content: text }];
+      return {
+        data: parsed,
+        usage: response.usage,
+        threadId: Buffer.from(JSON.stringify(updated)).toString("base64"),
+      };
     } catch (err) {
       lastErr = err;
-      const classified = classifyCodexError(err);
+      const classified = classifyError(err);
       if (classified.kind !== "generic") {
         markError(classified);
         throw classified;
       }
     }
   }
-  const finalErr = classifyCodexError(lastErr);
+  const finalErr = classifyError(lastErr);
   if (finalErr.kind !== "generic") markError(finalErr);
   throw finalErr;
 }
