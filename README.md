@@ -58,22 +58,23 @@ After every completed session the **evaluator** agent reads the journal end-to-e
 
 The four numbers are the difference between a study app and a measurement instrument.
 
-## Bring your own ChatGPT
+## Bring your own ChatGPT (or Claude)
 
 The AI side of Get It. has no business model layered on top.
 
-You sign in once with the ChatGPT account you already pay for (or an OpenAI API key) through the official Codex CLI. Every agent inside the app runs against your own tier. There is no Get It. server, no shared key pool, no per-message metering, no "AI credits" wallet, no second subscription, and no plan to ever ship one.
+You sign in once with a subscription you already pay for — either **OpenAI** (ChatGPT account or an OpenAI API key, through the official Codex CLI) or **Anthropic** (a Claude Pro/Max account, through the official Claude Code CLI's browser login). Every agent inside the app runs against your own tier. There is no Get It. server, no shared key pool, no per-message metering, no "AI credits" wallet, no second subscription, and no plan to ever ship one.
 
-- **You pay for AI once.** ChatGPT Plus, Pro, Team, Enterprise, or Edu covers everything Get It. does.
-- **Plus is the practical floor.** The free tier signs in but its Codex allowance is intentionally small. Plus and above give comfortable session headroom in the same flow.
+- **You pay for AI once.** On OpenAI, ChatGPT Plus, Pro, Team, Enterprise, or Edu covers everything Get It. does. On Anthropic, a Claude **Pro** or **Max** subscription does the same — the Claude Code browser login uses your subscription, not separate per-token API billing.
+- **Pick your engine.** Choose OpenAI Codex or Anthropic Claude in the first-launch wizard (and switch later from in-app settings). The two are interchangeable auth paths behind the same nine study agents.
+- **Plus / Pro is the practical floor.** OpenAI's free tier signs in but its Codex allowance is intentionally small; Plus and above give comfortable session headroom. On Anthropic, a Claude Pro or Max plan is required for the subscription login.
 - **Your data stays yours.** Your documents and study journal never leave your computer: no accounts, no cloud sync, no document upload, no model traffic through our servers. The only thing the app sends is an anonymous open/update ping — a random install id, the app version, and your OS, nothing else — so we can count how many people Get It. is helping; set `GETIT_DISABLE_ANALYTICS=1` to turn even that off. The work-context journal is a single JSON file on your disk, downloadable in one click from the right-pane menu.
-- **Rate limits are OpenAI's.** When you hit one, the app shows a countdown banner, stops cleanly, and your work is saved. Nothing retries in a loop: once the window clears you pick back up with a click (re-click a concept, hit Retry on a tool).
+- **Rate limits are the provider's.** When you hit one (OpenAI's or Anthropic's), the app shows a countdown banner, stops cleanly, and your work is saved. Nothing retries in a loop: once the window clears you pick back up with a click (re-click a concept, hit Retry on a tool).
 
 Other AI study apps wrap a marked-up subscription around a model API the vendor holds. Get It. wraps a study workflow around the access you already have.
 
 ## Install
 
-Get It. is a desktop app. Download the installer for your machine, double-click, sign in with the ChatGPT account you already use. Nothing else to buy.
+Get It. is a desktop app. Download the installer for your machine, double-click, then pick your AI engine and sign in with the OpenAI or Anthropic account you already use. Nothing else to buy.
 
 | Platform | Installer |
 |---|---|
@@ -86,7 +87,7 @@ Every release ships on the **[Releases](https://github.com/beltromatti/get-it/re
 
 ### First launch
 
-The setup wizard verifies the bundled Codex CLI, walks the OAuth sign-in, and refuses to open the main window until both gates are green. Then drop a PDF, or open one of the five bundled samples (anatomy, classical mechanics, Italian constitution, calculus, organic chemistry). Tags, chats, flashcard decks, quizzes, Feynman sessions, and the knowledge graph all stay on your computer.
+The setup wizard lets you choose **OpenAI Codex** or **Anthropic Claude**, verifies the matching bundled CLI, walks the browser OAuth sign-in, and refuses to open the main window until both gates (CLI present, signed in) are green. Then drop a PDF, or open one of the five bundled samples (anatomy, classical mechanics, Italian constitution, calculus, organic chemistry). Tags, chats, flashcard decks, quizzes, Feynman sessions, and the knowledge graph all stay on your computer.
 
 ### Gatekeeper and SmartScreen
 
@@ -163,7 +164,7 @@ upload  ─► quality gate (model-free) ─► pdfjs-dist extracts text + glyph
                   ◄── interactions since the last pass
 ```
 
-Nine prompts behind one auth path, nine schemas behind one shared SDK wrapper. The full design rationale, the four-axis rubric, the per-doc evaluator queue, the LLM-code sandbox, and the desktop-packaging layer are in [`technical-writeup.md`](technical-writeup.md), also rendered as [PDF](technical-writeup.pdf).
+Nine prompts behind two interchangeable auth paths (OpenAI Codex or Anthropic Claude), nine schemas behind one shared provider wrapper. The full design rationale, the four-axis rubric, the per-doc evaluator queue, the LLM-code sandbox, and the desktop-packaging layer are in [`technical-writeup.md`](technical-writeup.md), also rendered as [PDF](technical-writeup.pdf).
 
 ## The team
 
@@ -176,9 +177,9 @@ Built in 24 hours at **GDG AI Hack 2026, Milan**, for the **Braynr** challenge. 
 
 ## Notice
 
-**Get It. is an independent project. It is not affiliated with, endorsed by, or sponsored by OpenAI.** The app uses the official open-source [Codex CLI](https://github.com/openai/codex) as the transport between the local app and OpenAI's models, signed in with the end user's own ChatGPT or OpenAI API account. "OpenAI", "ChatGPT", and "Codex" are trademarks of their respective owner; we use the names only to describe what Get It. interoperates with.
+**Get It. is an independent project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic.** The app uses the official open-source [Codex CLI](https://github.com/openai/codex) and [Claude Code CLI](https://github.com/anthropics/claude-code) as the transport between the local app and each vendor's models, signed in with the end user's own account (ChatGPT/OpenAI API, or a Claude Pro/Max subscription). "OpenAI", "ChatGPT", and "Codex" are trademarks of OpenAI; "Anthropic", "Claude", and "Claude Code" are trademarks of Anthropic. We use the names only to describe what Get It. interoperates with.
 
-Your use of OpenAI's models through Get It. is subject to OpenAI's own [Terms of Use](https://openai.com/policies/terms-of-use), [Usage Policies](https://openai.com/policies/usage-policies), and [Privacy Policy](https://openai.com/policies/privacy-policy), and to the Codex CLI's [own license and release notes](https://github.com/openai/codex). Those documents are authoritative for what the model service permits, how data is handled on OpenAI's side, and what each subscription tier covers.
+Your use of OpenAI's or Anthropic's models through Get It. is subject to that vendor's own terms — OpenAI's [Terms of Use](https://openai.com/policies/terms-of-use), [Usage Policies](https://openai.com/policies/usage-policies), and [Privacy Policy](https://openai.com/policies/privacy-policy), and the Codex CLI's [license and release notes](https://github.com/openai/codex); or Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), [Usage Policy](https://www.anthropic.com/legal/aup), and [Privacy Policy](https://www.anthropic.com/legal/privacy), and the Claude Code CLI's own license. Those documents are authoritative for what each model service permits, how data is handled on the vendor's side, and what each subscription tier covers.
 
 ## License
 

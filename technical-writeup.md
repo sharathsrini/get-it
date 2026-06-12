@@ -96,6 +96,12 @@ Every call to OpenAI funnels through [`lib/codex.ts`](lib/codex.ts). The statele
 
 The pure error model (the `CodexError` kinds, the classifier, and the friendly per-kind payloads the request/response routes return) lives in a separate `codex-errors.ts` with no SDK import, so it stays unit-testable in isolation; `codex.ts` re-exports it.
 
+### Two providers behind one interface
+
+Agents don't import `lib/codex.ts` directly anymore — they import [`lib/ai`](lib/ai/index.ts), a thin selector that dispatches `runJson` / `runJsonInThread` to whichever provider the user picked (persisted as `aiProvider` in settings, defaulting to `codex`, resolved fresh per call so switching engines needs no restart). The provider-neutral interface lives in [`lib/ai/provider.ts`](lib/ai/provider.ts); the Codex path moves behind [`lib/ai/codex-provider.ts`](lib/ai/codex-provider.ts) (a thin adapter over `lib/codex.ts`), and **Anthropic Claude** is a second implementation in [`lib/ai/claude-provider.ts`](lib/ai/claude-provider.ts). The health mailbox and the markdown-fence-stripping JSON parser are lifted into [`lib/ai/health.ts`](lib/ai/health.ts) and [`lib/ai/json.ts`](lib/ai/json.ts) so both providers report into one snapshot and the existing `/api/codex/health` banner works unchanged for either engine.
+
+The Claude provider drives the official **Claude Code CLI** (`lib/claude.ts` spawns `claude -p --output-format json`), not an API key — the CLI's browser OAuth login (`claude setup-token`, wired through the same Electron wizard as Codex's login) uses the user's Claude Pro/Max **subscription**, preserving the "bring your own subscription, no separate billing" model. Schema enforcement is reproduced by instructing strict-JSON output and reusing the same parse-retry logic; Anthropic errors are translated into the shared `CodexError` kinds (`lib/claude-errors.ts`) so the countdown banner, preflight short-circuit, and inline retry all behave identically. Account info / logout parallel Codex in `lib/claude-account.ts`, surfaced through the provider-aware `/api/codex/account` and `/logout` routes.
+
 Nine prompts live behind that transport:
 
 | Where | What it returns | Schema |

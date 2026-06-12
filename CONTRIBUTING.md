@@ -45,7 +45,7 @@ Come say hi, tell us what you are interested in, and we will point you at someth
 ## Ways to contribute
 
 - **Code.** Visualization renderers, study tools, the knowledge-graph pipeline, the Electron shell, the in-app updater, the setup wizard.
-- **Agents and prompts.** Nine prompts sit behind one auth path. Better detection, better visualizations, fairer evaluation.
+- **Agents and prompts.** Nine prompts sit behind two interchangeable auth paths (OpenAI Codex or Anthropic Claude). Better detection, better visualizations, fairer evaluation.
 - **Cross-platform testing.** macOS (Apple Silicon and Intel), Windows 10 and 11, Linux. Different ChatGPT tiers, different document types.
 - **Docs.** This guide, the README, the technical writeup, and in-app copy.
 - **Triage.** Reproduce issues, label them, and help others land their first pull request.
